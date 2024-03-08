@@ -12,7 +12,7 @@ from astropy.visualization import simple_norm
 from astropy.io import fits
 from astropy.wcs import WCS
 import astropy.units as u
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import SkyCoord, FK5
 # from itertools import zip_longest, chain
 from matplotlib import colormaps
 
@@ -37,6 +37,71 @@ from PySide6.QtWidgets import (
 from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
 matplotlib.use('QtAgg')
+
+
+class slitParams:
+    def __init__(self):
+        self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
+        self.crpix = 0
+        self.npix = 0
+        self.PA = 0 * u.deg
+        self.scale = 1
+        self.width = 1 * u.arcsec
+
+    def fromHeader(self, hdr):
+        if 'EPOCH' in hdr:
+            equinox = "J" + str(hdr['EPOCH'])
+            self.refcoord = SkyCoord(hdr['RA'], hdr['DEC'],
+                                     unit=(u.hourangle, u.deg),
+                                     frame=FK5(equinox=equinox))
+        else:
+            self.refcoord = SkyCoord(hdr['RA'], hdr['DEC'],
+                                     unit=(u.hourangle, u.deg))
+
+        self.scale = hdr['CDELT2']  # arcsec/pix
+        self.npix = hdr['NAXIS2']
+
+        if 'CRPIX2' in hdr:
+            self.crpix = hdr['CRPIX2']
+        else:
+            self.crpix = hdr['NAXIS2'] / 2
+
+        if 'POSANG' in hdr:
+            # TDS
+            self.PA = hdr['POSANG']
+        elif 'PARANGLE' in hdr and 'ROTANGLE' in hdr:
+            # SCORPIO
+            self.PA = hdr['PARANGLE'] - hdr['ROTANGLE'] + 132.5
+        else:
+            self.PA = 0
+
+        if self.scale < 0:
+            self.PA += 180
+            self.scale *= -1
+
+        # if PA not in [0,360) (including negative PA)
+        self.PA = self.PA - 360 * (self.PA // 360)
+
+        if 'SLIT' in hdr:
+            self.width = self.parse_tds_slit(hdr['SLIT'])
+        else:
+            self.width = 1.0
+
+    def fromFields(self, RA, DEC, PA, scale):
+        self.PA = PA
+        self.scale = scale
+        self.refcoord = SkyCoord(RA, DEC,
+                                 unit=(u.hourangle, u.deg))
+
+    def parse_tds_slit(self, slitname):
+        if slitname == '1asec':
+            return 1.0
+        elif slitname == '1.5asec':
+            return 1.5
+        elif slitname == '10asec':
+            return 10
+        print('Unknown SLIT keyword')
+        return 1.0
 
 
 class objectImage():
@@ -154,6 +219,10 @@ class PlotWidget(QWidget):
         super().__init__(parent)
         self.myStatus = QStatusBar()
 
+        self.obj_frame = None
+        self.spec_frame = None
+        self.slit = slitParams()
+
         # flags to replot image and flux
         # self.image_changed = False
         # self.spec_changed = False
@@ -228,12 +297,9 @@ class PlotWidget(QWidget):
         glayout.setRowStretch(2, 0)
         # glayout.setRowStretch(3, 0)
         self.setLayout(glayout)
-
-        self.obj_frame = None
-        self.spec_frame = None
     #
         self.redraw_button.clicked.connect(self.redraw)
-    #     self.csv_field.changed_path.connect(self.csvChanged)
+        self.spec_field.changed_path.connect(self.specChanged)
         self.image_field.changed_path.connect(self.imagePathChanged)
     #     self.PA_input.valueChanged.connect(self.galFrameChanged)
     #     self.ra_input.valueChanged.connect(self.galFrameChanged)
@@ -253,9 +319,16 @@ class PlotWidget(QWidget):
             print('IMAGE NOT FOUND')
             self.obj_frame = None
     #
-    # @Slot()
-    # def csvChanged(self):
-    #     self.csv_changed = True
+    @Slot()
+    def specChanged(self):
+        try:
+            print('Opening ', self.spec_field.files)
+            self.spec_frame = fits.open(self.spec_field.files)[0]
+            self.slit.fromHeader(self.spec_frame.header)
+            self.fillFiledsFromSlit(self.slit)
+        except FileNotFoundError:
+            print('SPECTRUM NOT FOUND')
+            self.spec_frame = None
     #
     # @Slot()
     # def calc_dist(self):
@@ -334,6 +407,12 @@ class PlotWidget(QWidget):
     #     self.calc_dist()
     #     self.dist = self.dist_input.value()
     #     self.gal_frame = self.gal_center.skyoffset_frame(rotation=self.PA)
+
+    def fillFiledsFromSlit(self, slit: slitParams):
+        self.PA_input.setValue(slit.PA)
+        self.scale_input.setValue(slit.scale)
+        self.dec_input.setValue(slit.refcoord.dec)
+        self.ra_input.setValue(slit.refcoord.ra)
 
 
 if __name__ == "__main__":
