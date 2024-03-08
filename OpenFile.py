@@ -47,21 +47,19 @@ class OpenFile(QWidget):
     @Slot()
     def on_open_folder(self):
         regexps = "All (*)"
+        files_path = None
         if self.mode == 'n':
             files_path = QFileDialog.getOpenFileNames(self, "Fits", self.dir,
                                                       regexps)[0]
             self.dir = "/".join(files_path[0].split('/')[:-1])
-            self.changed_path.emit(self.dir)
         elif self.mode == 'o':
             files_path = QFileDialog.getOpenFileName(self, "Fits", self.dir,
                                                      regexps)[0]
             self.dir = "/".join(files_path.split('/')[:-1])
-            self.changed_path.emit(self.dir)
         elif self.mode == 'w':
             files_path = QFileDialog.getSaveFileName(self, "Fits", self.dir,
                                                      regexps)[0]
             self.dir = "/".join(files_path.split('/')[:-1])
-            self.changed_path.emit(self.dir)
             ext = files_path.split('.')
             if len(ext) < 2:
                 files_path = files_path + '.fits'
@@ -69,10 +67,16 @@ class OpenFile(QWidget):
         if files_path:
             if self.mode == 'n':
                 self.files = files_path.copy()
-                self.fits_box.setText(', '.join(files_path))
+                new_text = ', '.join(files_path)
             else:
                 self.files = files_path
-                self.fits_box.setText(files_path)
+                new_text = files_path
+
+            if self.fits_box.text() != new_text:
+                self.fits_box.setText(new_text)
+                self.changed_path.emit(self.dir)
+
+
 
     def fill_string(self, string):
         self.fits_box.setText(string)

@@ -13,7 +13,6 @@ from astropy.io import fits
 from astropy.wcs import WCS
 import astropy.units as u
 from astropy.coordinates import SkyCoord
-import pandas as pd
 # from itertools import zip_longest, chain
 from matplotlib import colormaps
 
@@ -30,8 +29,9 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QPushButton,
-    QFileDialog,
-    QCheckBox,
+    QStatusBar,
+    # QFileDialog,
+    # QCheckBox,
 )
 
 from OpenFile import OpenFile
@@ -39,129 +39,31 @@ from radecSpinBox import radecSpinBox
 matplotlib.use('QtAgg')
 
 
-def plot_slit_points(ax, rel_slit, masks=None, gal_frame=None, line=None):
-    if masks is None:
-        masks = [np.ones(len(rel_slit)).astype(bool)]
-    for mask in masks:
-        if len(mask[mask]) > 0:
-            ax.plot(rel_slit.ra[mask], rel_slit.dec[mask], marker='.',
-                    linestyle='', transform=ax.get_transform(gal_frame))
-
-
-def los_to_rc(data, slit, gal_frame, inclination, sys_vel, dist,
-              obj_name=None, verr_lim=200):
-    '''
-    data - pd.DataFrame
-    slit - SkyCoord (inerable - SkyCoord of list)
-    gal_frame - coordinates frame
-    inclination - float * u.deg
-    sys_vel - float
-    obj_name - str
-    verr_lim - float
-    '''
-    # H0 = 70 / (1e+6 * u.parsec)
-    if 'position' in data:
-        slit_pos = data['position']
-    else:
-        slit_pos = slit.separation(slit[0]).to(u.arcsec)
-
-    gal_center = SkyCoord(0 * u.deg, 0 * u.deg, frame=gal_frame)
-    rel_slit = slit.transform_to(gal_frame)
-
-    dist = dist * 1000000 * u.parsec
-    # dist = sys_vel / H0
-    # Исправляем за наклон галактики
-    rel_slit_corr = SkyCoord(rel_slit.lon / np.cos(inclination), rel_slit.lat,
-                             frame=gal_frame)
-    # Угловое расстояние точек щели до центра галактики
-    # (с поправкой на наклон галактики)
-    Separation = rel_slit_corr.separation(gal_center)
-    # Физическое расстояние
-    R_slit = dist * np.sin(Separation)
-
-    # Угол направления на центр галактики
-    gal_frame_center = gal_center.transform_to(gal_frame)
-    slit_gal_PA = gal_frame_center.position_angle(rel_slit_corr)
-
-    vel_lon = (data['velocity'].to_numpy() - sys_vel) / np.sin(inclination)
-    if 'v_err' in data:
-        vel_lon_err = np.abs(data['v_err'].to_numpy() / np.sin(inclination))
-    else:
-        vel_lon_err = data['velocity'].to_numpy() * 0
-
-    vel_r = vel_lon / np.cos(slit_gal_PA)
-    vel_r_err = np.abs(vel_lon_err / np.cos(slit_gal_PA))
-
-    mask = (vel_r_err < verr_lim)
-    mask_center = (Separation.to(u.arcsec) > 5 * u.arcsec)
-    cone_angle = 20 * u.deg
-    mask_cone_1 = (slit_gal_PA > 90 * u.deg - cone_angle) & \
-                  (slit_gal_PA < 90 * u.deg + cone_angle)
-    mask_cone_2 = (slit_gal_PA > 270 * u.deg - cone_angle) & \
-                  (slit_gal_PA < 270 * u.deg + cone_angle)
-    mask_cone = ~(mask_cone_1 | mask_cone_2)
-    mask = mask & mask_center
-    mask = mask & mask_cone
-
-    # lat = np.array(rel_slit_corr.lat.to(u.arcsec)/u.arcsec)
-    # minor_ax = np.argmin(np.abs(lat))
-
-    closest_point = np.argmin(np.abs(R_slit))
-
-    first_side = (slit_pos >= slit_pos[closest_point])
-    second_side = (slit_pos < slit_pos[closest_point])
-    first_side_mask = (first_side & mask)
-    second_side_mask = (second_side & mask)
-
-    data['Circular_v'] = -vel_r
-    data['Circular_v_err'] = vel_r_err
-    data['R_pc'] = R_slit / u.parsec
-    data['R_arcsec'] = Separation.to(u.arcsec) / u.arcsec
-    data['mask1'] = np.array(first_side_mask, dtype=bool)
-    data['mask2'] = np.array(second_side_mask, dtype=bool)
-
-    return data
-
-
-class galaxyImage():
-    def __init__(self, figure, image):
-        self.colors = colormaps['tab20'](np.linspace(0, 1, 20))
-        self.wcs = WCS(image.header)
+class objectImage():
+    '''Photometry of an object, its plot and slit shown on image'''
+    def __init__(self, figure, frame):
+        self.wcs = WCS(frame.header)
         self.figure = figure
-        self.axes_gal = figure.subplots(
+        self.axes_obj = figure.subplots(
             subplot_kw={'projection': self.wcs})
-        self.image = image
-        self.norm_im = simple_norm(image.data, 'linear', percent=99.3)
-        self.slits = None
-        self.masks = None
-        self.slit_draws = None
-        self.plot_galaxy()
+        self.image = frame.data
+        self.norm_im = simple_norm(self.image, 'linear', percent=99.3)
+        # self.slits = None
+        # self.masks = None
+        # self.slit_draws = None
+        self.plot_image()
 
-    def plot_galaxy(self, gal_frame=None):
-        self.axes_gal.clear()
-        self.axes_gal = self.figure.subplots(
+    def plot_image(self, gal_frame=None):
+        self.axes_obj.clear()
+        self.axes_obj = self.figure.subplots(
             subplot_kw={'projection': self.wcs})
-        self.axes_gal.imshow(self.image.data, cmap='bone', norm=self.norm_im)
+        self.axes_obj.imshow(self.image, cmap='bone', norm=self.norm_im)
         # "Стираем" чёрточки по краям картинки
-        self.axes_gal.coords['ra'].set_ticks(color='white')
-        self.axes_gal.coords['dec'].set_ticks(color='white')
+        # self.axes_gal.coords['ra'].set_ticks(color='white')
+        # self.axes_gal.coords['dec'].set_ticks(color='white')
 
-        if gal_frame is not None:
-            self.gal_frame = gal_frame
-            self.overlay = self.axes_gal.get_coords_overlay(gal_frame)
-            # "Стираем" чёрточки по краям картинки
-            self.overlay['lon'].set_ticks(color='white')
-            self.overlay['lat'].set_ticks(color='white')
-            self.overlay['lon'].set_ticklabel(alpha=0)
-            self.overlay['lat'].set_ticklabel(alpha=0)
-            self.overlay.grid(color='white', linestyle='solid', alpha=0.5)
-            self.axes_gal.plot(0, 0, 'ro',
-                               transform=self.axes_gal.get_transform(gal_frame))
-
-        if self.slits is not None:
-            self.plot_slit(self.slits, self.masks)
-
-        # plot_galaxy(self.axes_gal, self.image, self.gal_frame)
+        # if self.slits is not None:
+        #     self.plot_slit(self.slits, self.masks)
 
     def plot_slit(self, slits, masks):
         self.slits = slits
@@ -250,10 +152,11 @@ class PlotWidget(QWidget):
     def __init__(self, parent=None, spec=None, frame=None, refcenter=None, PA=0.,
                  scale=0., velocity=0.):
         super().__init__(parent)
+        self.myStatus = QStatusBar()
 
         # flags to replot image and flux
-        self.image_changed = False
-        self.spec_changed = False
+        # self.image_changed = False
+        # self.spec_changed = False
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -262,14 +165,14 @@ class PlotWidget(QWidget):
         self.toolbar_image = NavigationToolbar2QT(self.image_fig, self)
 
         self.image_field = OpenFile(text='image', mode='o')
-        # if filename of image is set in the terminal
+        # if filename of an image is set in the terminal
         if frame is not None:
             self.image_field.fill_string(frame)
             # need to plot image
             self.image_changed = True
 
         self.spec_field = OpenFile(text='spectrum', mode='o')
-        # if filename of spectra is set in the terminal
+        # if filename of a spectrum is set in the terminal
         if spec is not None:
             self.spec_field.fill_string(spec)
             self.spec_changed = True
@@ -277,8 +180,7 @@ class PlotWidget(QWidget):
         self.PA_input = QDoubleSpinBox()
         self.PA_input.setKeyboardTracking(False)
         self.PA_input.setMaximum(360.0)
-        # TODO: check if there is setMinimum
-        # self.PA_input.setMinimum(-360.0)
+        self.PA_input.setMinimum(-360.0)
         self.PA_input.setValue(PA)
 
         self.scale_input = QDoubleSpinBox()
@@ -320,16 +222,19 @@ class PlotWidget(QWidget):
         glayout.addWidget(self.image_fig, 1, 1)
         glayout.addLayout(left_layout, 2, 0)
         glayout.addLayout(right_layout, 2, 1)
+        # glayout.addItem(self.myStatus, 3, 0, columnSpan=2)
         glayout.setRowStretch(0, 0)
         glayout.setRowStretch(1, 1)
         glayout.setRowStretch(2, 0)
+        # glayout.setRowStretch(3, 0)
         self.setLayout(glayout)
 
-    #     self.galIm = None
+        self.obj_frame = None
+        self.spec_frame = None
     #
-    #     self.redraw_button.clicked.connect(self.redraw)
+        self.redraw_button.clicked.connect(self.redraw)
     #     self.csv_field.changed_path.connect(self.csvChanged)
-    #     self.image_field.changed_path.connect(self.galChanged)
+        self.image_field.changed_path.connect(self.imagePathChanged)
     #     self.PA_input.valueChanged.connect(self.galFrameChanged)
     #     self.ra_input.valueChanged.connect(self.galFrameChanged)
     #     self.dec_input.valueChanged.connect(self.galFrameChanged)
@@ -339,9 +244,14 @@ class PlotWidget(QWidget):
     #     self.saveres_button.clicked.connect(self.save_rc)
     #     self.dist_checkbox.stateChanged.connect(self.kinematicsChanged)
     #
-    # @Slot()
-    # def galChanged(self):
-    #     self.gal_changed = True
+    @Slot()
+    def imagePathChanged(self):
+        try:
+            print('Opening ', self.image_field.files)
+            self.obj_frame = fits.open(self.image_field.files)[0]
+        except FileNotFoundError:
+            print('IMAGE NOT FOUND')
+            self.obj_frame = None
     #
     # @Slot()
     # def csvChanged(self):
@@ -372,17 +282,16 @@ class PlotWidget(QWidget):
     #                           self.dist)
     #     self.plot_fig.draw()
     #
-    # @Slot()
-    # def redraw(self):
-    #     """ Update the plot with the current input values """
-    #     self.updateValues()
-    #
-    #     if self.gal_changed:
-    #         self.gal_fig.figure.clear()
-    #         image = fits.open(self.image_field.files)[0]
-    #         self.galIm = galaxyImage(self.gal_fig.figure, image)
-    #         self.galIm.plot_galaxy(self.gal_frame)
-    #         self.gal_changed = False
+    @Slot()
+    def redraw(self):
+        """Redraw all plots. This function runs only when redraw button is clicked."""
+        self.updateValues()
+
+        # if the string with image frame path is not empty
+        if self.obj_frame:
+            self.image_fig.figure.clear()
+            # objectImage stores image, its wcs and current slit_position
+            self.objIm = objectImage(self.image_fig.figure, self.obj_frame)
     #
     #     if self.csv_changed:
     #         self.plot_fig.figure.clear()
@@ -396,7 +305,7 @@ class PlotWidget(QWidget):
     #             self.galIm.plot_slit(slits, masks)
     #         self.csv_changed = False
     #
-    #     self.gal_fig.draw()
+        self.image_fig.draw()
     #     self.plot_fig.draw()
     #
     # @Slot()
@@ -414,7 +323,8 @@ class PlotWidget(QWidget):
     #         dat[['RA', 'DEC', 'Circular_v', 'Circular_v_err',
     #              'R_pc', 'R_arcsec', 'mask1', 'mask2']].to_csv(file_path)
     #
-    # def updateValues(self):
+    def updateValues(self):
+        pass
     #     self.inclination = self.i_input.value() * u.deg
     #     self.PA = self.PA_input.value() * u.deg
     #     self.gal_center = SkyCoord(self.ra_input.getAngle(),
