@@ -15,6 +15,7 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord, FK5
 # from itertools import zip_longest, chain
 from matplotlib import colormaps
+from matplotlib import pyplot as plt
 
 # from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
+from slitPolygon import slitPolygon
 matplotlib.use('QtAgg')
 
 
@@ -47,6 +49,7 @@ class slitParams:
         self.PA = 0 * u.deg
         self.scale = 1
         self.width = 1 * u.arcsec
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA)
 
     def fromHeader(self, hdr):
         if 'EPOCH' in hdr:
@@ -86,6 +89,8 @@ class slitParams:
             self.width = self.parse_tds_slit(hdr['SLIT'])
         else:
             self.width = 1.0
+
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
     def fromFields(self, RA, DEC, PA, scale):
         self.PA = PA
@@ -130,34 +135,24 @@ class objectImage():
         # if self.slits is not None:
         #     self.plot_slit(self.slits, self.masks)
 
-    def plot_slit(self, slits, masks):
-        self.slits = slits
-        self.masks = masks
-        for slit, mask in zip(slits, masks):
-            plot_slit_points(self.axes_gal, slit, mask,
-                             'icrs')
+    def plot_slit(self, slit):
+        h_up = (slit.npix - slit.crpix) * slit.scale * u.arcsec
+        h_down = slit.crpix * slit.scale * u.arcsec
+        refcoord = slit.refcoord
+        s = slitPolygon([refcoord.ra.to(u.deg), refcoord.dec.to(u.deg)], slit.width * u.arcsec, h_up, h_down,
+                   theta=slit.PA * u.deg,
+                   edgecolor='tab:olive', facecolor='none', lw=0.5)
 
-        for line in self.axes_gal.lines:
-            self.axes_gal.lines.remove(line)
+        s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
+                   theta=0 * u.deg,
+                   edgecolor='tab:olive', facecolor='none', lw=0.5,
+                   transform=self.axes_obj.get_transform(slit.frame))
+        self.axes_obj.add_patch(s)
+        # ax = plt.subplot(projection=self.wcs)
+        # ax.imshow(self.image, cmap='bone', norm=self.norm_im)
+        # ax.add_patch(s)
+        # plt.show()
 
-        for slit, mask, i in zip(slits, masks, range(0, 20, 2)):
-            mask1, mask2 = mask
-            if len(mask1[mask1]) > 0:
-                self.axes_gal.plot(
-                    slit.ra[mask1],
-                    slit.dec[mask1],
-                    marker='.',
-                    linestyle='',
-                    transform=self.axes_gal.get_transform('icrs'),
-                    color=self.colors[i])
-            if len(mask2[mask2]) > 0:
-                self.axes_gal.plot(
-                    slit.ra[mask2],
-                    slit.dec[mask2],
-                    marker='.',
-                    linestyle='',
-                    transform=self.axes_gal.get_transform('icrs'),
-                    color=self.colors[i + 1])
 
 
 class csvPlot():
@@ -174,16 +169,7 @@ class csvPlot():
         self.axes_plot = figure.subplots()
 
     def calc_rc(self, gal_frame, inclination, sys_vel, dist=None):
-        if dist is None:
-            dist = sys_vel / 70.
-        self.axes_plot.clear()
-        self.masks = []
-        for dat, slit in zip(self.data, self.slits):
-            dat = los_to_rc(dat, slit, gal_frame, inclination, sys_vel, dist)
-            self.masks.append([dat['mask1'].to_numpy(),
-                               dat['mask2'].to_numpy()])
-        self.plot_rc()
-        return self.slits, self.masks
+        pass
 
     def plot_rc(self):
         self.axes_plot.set_ylabel('Circular Velocity, km/s')
@@ -365,6 +351,7 @@ class PlotWidget(QWidget):
             self.image_fig.figure.clear()
             # objectImage stores image, its wcs and current slit_position
             self.objIm = objectImage(self.image_fig.figure, self.obj_frame)
+            self.objIm.plot_slit(self.slit)
     #
     #     if self.csv_changed:
     #         self.plot_fig.figure.clear()

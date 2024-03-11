@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib.patches import Polygon
 from astropy import units as u
 
-class mySlit(Polygon):
+class slitPolygon(Polygon):
     """
     Create a patch representing a latitude-longitude quadrangle rotated by
     given angle.
