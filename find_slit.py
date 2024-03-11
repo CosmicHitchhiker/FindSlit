@@ -93,10 +93,12 @@ class slitParams:
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
     def fromFields(self, RA, DEC, PA, scale):
-        self.PA = PA
+        self.PA = PA * u.deg
         self.scale = scale
         self.refcoord = SkyCoord(RA, DEC,
                                  unit=(u.hourangle, u.deg))
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA)
+
 
     def parse_tds_slit(self, slitname):
         if slitname == '1asec':
@@ -136,18 +138,19 @@ class objectImage():
         #     self.plot_slit(self.slits, self.masks)
 
     def plot_slit(self, slit):
+        if self.axes_obj.patches:
+            list(self.axes_obj.patches)[0].remove()
+            # self.figure.canvas.draw()
+
         h_up = (slit.npix - slit.crpix) * slit.scale * u.arcsec
         h_down = slit.crpix * slit.scale * u.arcsec
         refcoord = slit.refcoord
-        s = slitPolygon([refcoord.ra.to(u.deg), refcoord.dec.to(u.deg)], slit.width * u.arcsec, h_up, h_down,
-                   theta=slit.PA * u.deg,
-                   edgecolor='tab:olive', facecolor='none', lw=0.5)
-
         s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
                    theta=0 * u.deg,
                    edgecolor='tab:olive', facecolor='none', lw=0.5,
                    transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(s)
+        self.figure.canvas.draw()
         # ax = plt.subplot(projection=self.wcs)
         # ax.imshow(self.image, cmap='bone', norm=self.norm_im)
         # ax.add_patch(s)
@@ -200,7 +203,7 @@ class csvPlot():
 
 class PlotWidget(QWidget):
     '''main window'''
-    def __init__(self, parent=None, spec=None, frame=None, refcenter=None, PA=0.,
+    def __init__(self, parent=None, spec=None, obj=None, refcenter=None, PA=0.,
                  scale=0., velocity=0.):
         super().__init__(parent)
         self.myStatus = QStatusBar()
@@ -220,17 +223,7 @@ class PlotWidget(QWidget):
         self.toolbar_image = NavigationToolbar2QT(self.image_fig, self)
 
         self.image_field = OpenFile(text='image', mode='o')
-        # if filename of an image is set in the terminal
-        if frame is not None:
-            self.image_field.fill_string(frame)
-            # need to plot image
-            self.image_changed = True
-
         self.spec_field = OpenFile(text='spectrum', mode='o')
-        # if filename of a spectrum is set in the terminal
-        if spec is not None:
-            self.spec_field.fill_string(spec)
-            self.spec_changed = True
 
         self.PA_input = QDoubleSpinBox()
         self.PA_input.setKeyboardTracking(False)
@@ -240,6 +233,7 @@ class PlotWidget(QWidget):
 
         self.scale_input = QDoubleSpinBox()
         self.scale_input.setKeyboardTracking(False)
+        self.scale_input.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
         self.scale_input.setValue(scale)
 
         self.ra_input = radecSpinBox(radec='ra')
@@ -283,11 +277,23 @@ class PlotWidget(QWidget):
         glayout.setRowStretch(2, 0)
         # glayout.setRowStretch(3, 0)
         self.setLayout(glayout)
+
+        # if filename of an image is set in the terminal
+        if obj is not None:
+            self.image_field.fill_string(obj)
+            self.imagePathChanged()
+        # if filename of a spectrum is set in the terminal
+        if spec is not None:
+            self.spec_field.fill_string(spec)
+            self.specChanged()
     #
         self.redraw_button.clicked.connect(self.redraw)
         self.spec_field.changed_path.connect(self.specChanged)
         self.image_field.changed_path.connect(self.imagePathChanged)
-    #     self.PA_input.valueChanged.connect(self.galFrameChanged)
+        self.PA_input.valueChanged.connect(self.updatePlots)
+        self.ra_input.valueChanged.connect(self.updatePlots)
+        self.dec_input.valueChanged.connect(self.updatePlots)
+        self.scale_input.valueChanged.connect(self.updatePlots)
     #     self.ra_input.valueChanged.connect(self.galFrameChanged)
     #     self.dec_input.valueChanged.connect(self.galFrameChanged)
     #     self.vel_input.valueChanged.connect(self.kinematicsChanged)
@@ -299,7 +305,7 @@ class PlotWidget(QWidget):
     @Slot()
     def imagePathChanged(self):
         try:
-            print('Opening ', self.image_field.files)
+            print('Opening image ', self.image_field.files)
             self.obj_frame = fits.open(self.image_field.files)[0]
         except FileNotFoundError:
             print('IMAGE NOT FOUND')
@@ -308,10 +314,18 @@ class PlotWidget(QWidget):
     @Slot()
     def specChanged(self):
         try:
-            print('Opening ', self.spec_field.files)
+            print('Opening spectrum ', self.spec_field.files)
+            self.PA_input.blockSignals(True)
+            self.ra_input.blockSignals(True)
+            self.dec_input.blockSignals(True)
+            self.scale_input.blockSignals(True)
             self.spec_frame = fits.open(self.spec_field.files)[0]
             self.slit.fromHeader(self.spec_frame.header)
             self.fillFiledsFromSlit(self.slit)
+            self.PA_input.blockSignals(False)
+            self.ra_input.blockSignals(False)
+            self.dec_input.blockSignals(False)
+            self.scale_input.blockSignals(False)
         except FileNotFoundError:
             print('SPECTRUM NOT FOUND')
             self.spec_frame = None
@@ -384,7 +398,8 @@ class PlotWidget(QWidget):
     #              'R_pc', 'R_arcsec', 'mask1', 'mask2']].to_csv(file_path)
     #
     def updateValues(self):
-        pass
+        self.slit.fromFields(self.ra_input.getAngle(), self.dec_input.getAngle(),
+                             self.PA_input.value(), self.scale_input.value())
     #     self.inclination = self.i_input.value() * u.deg
     #     self.PA = self.PA_input.value() * u.deg
     #     self.gal_center = SkyCoord(self.ra_input.getAngle(),
@@ -401,27 +416,26 @@ class PlotWidget(QWidget):
         self.dec_input.setValue(slit.refcoord.dec)
         self.ra_input.setValue(slit.refcoord.ra)
 
+    @Slot()
+    def updatePlots(self):
+        self.updateValues()
+        try:
+            self.objIm.plot_slit(self.slit)
+        except AttributeError:
+            print('No object presented')
+
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--csv', nargs='+', default=None,
-                        help='''csv or similar file with positions and
-                        velocities''')
-    parser.add_argument('-r', '--refcenter', nargs=2, default=None,
-                        help='''coordinates of center of galaxy''')
-    parser.add_argument('-v', '--velocity', type=float, default=0.0,
-                        help='system velocity')
-    parser.add_argument('-p', '--PA', type=float, default=0.0,
-                        help='galaxy PA')
-    parser.add_argument('-i', '--inclination', type=float, default=0.0,
-                        help='inclination of galaxy')
-    parser.add_argument('-f', '--frame', default=None,
-                        help='frame with image')
+    parser.add_argument('-s', '--spectrum', nargs='?', default=None,
+                        help='''long-slit spectrum''')
+    parser.add_argument('-i', '--image', nargs='?', default=None,
+                        help='''photometry''')
     pargs = parser.parse_args(sys.argv[1:])
 
     app = QApplication(sys.argv)
-    w = PlotWidget(None, pargs.csv, pargs.frame, pargs.refcenter, pargs.PA,
-                   pargs.inclination, pargs.velocity)
+    w = PlotWidget(None, pargs.spectrum, pargs.image)
     w.show()
     sys.exit(app.exec())
