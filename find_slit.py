@@ -41,7 +41,7 @@ from slitPolygon import slitPolygon
 matplotlib.use('QtAgg')
 
 
-class slitParams:
+class SlitParams:
     def __init__(self):
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
         self.crpix = 0
@@ -120,9 +120,6 @@ class objectImage():
             subplot_kw={'projection': self.wcs})
         self.image = frame.data
         self.norm_im = simple_norm(self.image, 'linear', percent=99.3)
-        # self.slits = None
-        # self.masks = None
-        # self.slit_draws = None
         self.plot_image()
 
     def plot_image(self, gal_frame=None):
@@ -130,12 +127,6 @@ class objectImage():
         self.axes_obj = self.figure.subplots(
             subplot_kw={'projection': self.wcs})
         self.axes_obj.imshow(self.image, cmap='bone', norm=self.norm_im)
-        # "Стираем" чёрточки по краям картинки
-        # self.axes_gal.coords['ra'].set_ticks(color='white')
-        # self.axes_gal.coords['dec'].set_ticks(color='white')
-
-        # if self.slits is not None:
-        #     self.plot_slit(self.slits, self.masks)
 
     def plot_slit(self, slit):
         if self.axes_obj.patches:
@@ -144,77 +135,51 @@ class objectImage():
 
         h_up = (slit.npix - slit.crpix) * slit.scale * u.arcsec
         h_down = slit.crpix * slit.scale * u.arcsec
-        refcoord = slit.refcoord
         s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
                    theta=0 * u.deg,
                    edgecolor='tab:olive', facecolor='none', lw=0.5,
                    transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(s)
         self.figure.canvas.draw()
-        # ax = plt.subplot(projection=self.wcs)
-        # ax.imshow(self.image, cmap='bone', norm=self.norm_im)
-        # ax.add_patch(s)
-        # plt.show()
 
 
+class PlotSpec():
+    def __init__(self, figure, frame):
+        self.figure = figure
+        self.axes_obj = figure.subplots()
+        x_range = slice(None, None)
+        self.flux = np.sum(frame.data[:, x_range], axis=1)
+        self.spectrum = frame.data
+        self.hdr = frame.header
+        self.pos = self.coords_from_header(axes=2)
+        self.plot_spectrum_flux()
 
-class csvPlot():
-    def __init__(self, data, figure):
-        self.colors = colormaps['tab20'](np.linspace(0, 1, 20))
-        # data - list of pd.DataFrame
-        self.data = data
-        self.slits = []
-        for dat in self.data:
-            slit_ra = dat['RA']
-            slit_dec = dat['DEC']
-            self.slits.append(SkyCoord(slit_ra, slit_dec, frame='icrs',
-                                       unit=(u.hourangle, u.deg)))
-        self.axes_plot = figure.subplots()
+    def coords_from_header(self, axes=1):
+        naxis = self.hdr['NAXIS'+str(axes)]
+        cdelt = self.hdr['CDELT'+str(axes)]
+        crpix = self.hdr['CRPIX'+str(axes)]
+        crval = self.hdr['CRVAL'+str(axes)]
+        pix = np.arange(int(naxis)) + 1
+        coords = float(cdelt) * (pix - int(crpix)) + float(crval)
+        return coords
 
-    def calc_rc(self, gal_frame, inclination, sys_vel, dist=None):
-        pass
+    def plot_spectrum_flux(self):
+        self.axes_obj.plot(self.pos, self.flux)
 
-    def plot_rc(self):
-        self.axes_plot.set_ylabel('Circular Velocity, km/s')
-        self.axes_plot.set_xlabel('R, parsec')
-        for dat, mask, i in zip(self.data, self.masks, range(0, 20, 2)):
-            verr = dat['Circular_v_err'].to_numpy()
-            mask1, mask2 = mask
-            if len(mask1[mask1]) > 0:
-                self.axes_plot.errorbar(
-                    dat['R_pc'][mask1],
-                    dat['Circular_v'][mask1],
-                    yerr=verr[mask1],
-                    linestyle='',
-                    marker='.',
-                    color=self.colors[i])
-            if len(mask2[mask2]) > 0:
-                self.axes_plot.errorbar(
-                    dat['R_pc'][mask2],
-                    dat['Circular_v'][mask2],
-                    yerr=verr[mask2],
-                    linestyle='',
-                    marker='.',
-                    color=self.colors[i + 1])
-
-    def return_rc(self):
-        return self.data
 
 
 class PlotWidget(QWidget):
     '''main window'''
     def __init__(self, parent=None, spec=None, obj=None, refcenter=None, PA=0.,
-                 scale=0., velocity=0.):
+                 scale=0.):
         super().__init__(parent)
         self.myStatus = QStatusBar()
 
-        self.obj_frame = None
+        self.image_frame = None
         self.spec_frame = None
-        self.slit = slitParams()
-
-        # flags to replot image and flux
-        # self.image_changed = False
-        # self.spec_changed = False
+        self.image_plot = None
+        self.spec_plot = None
+        self.slit = SlitParams()
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -229,22 +194,18 @@ class PlotWidget(QWidget):
         self.PA_input.setKeyboardTracking(False)
         self.PA_input.setMaximum(360.0)
         self.PA_input.setMinimum(-360.0)
-        self.PA_input.setValue(PA)
 
         self.scale_input = QDoubleSpinBox()
         self.scale_input.setKeyboardTracking(False)
+        # noinspection PyUnresolvedReferences
         self.scale_input.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
-        self.scale_input.setValue(scale)
 
         self.ra_input = radecSpinBox(radec='ra')
         self.dec_input = radecSpinBox(radec='dec')
         self.ra_input.setKeyboardTracking(False)
         self.dec_input.setKeyboardTracking(False)
-        if refcenter is not None:
-            self.ra_input.setValue(refcenter[0])
-            self.dec_input.setValue(refcenter[1])
 
-        self.redraw_button = QPushButton(text='Redraw')
+        self.redraw_button = QPushButton(text='Reopen files')
         self.saveres_button = QPushButton(text='Save Results')
         self.calculate_button = QPushButton(text='Find optimal parameters')
 
@@ -256,11 +217,11 @@ class PlotWidget(QWidget):
         left_layout = QFormLayout()
         left_layout.addRow(self.spec_field)
         left_layout.addRow('RA', self.ra_input)
-        left_layout.addRow('DEC', self.dec_input)
+        left_layout.addRow('PA', self.PA_input)
         left_layout.addRow(self.calculate_button)
         right_layout = QFormLayout()
         right_layout.addRow(self.image_field)
-        right_layout.addRow('PA', self.PA_input)
+        right_layout.addRow('DEC', self.dec_input)
         right_layout.addRow('Scale "/pix', self.scale_input)
         right_layout.addRow(button_layout)
 
@@ -275,9 +236,10 @@ class PlotWidget(QWidget):
         glayout.setRowStretch(0, 0)
         glayout.setRowStretch(1, 1)
         glayout.setRowStretch(2, 0)
-        # glayout.setRowStretch(3, 0)
         self.setLayout(glayout)
 
+        self.PA_input.setValue(PA)
+        self.scale_input.setValue(scale)
         # if filename of an image is set in the terminal
         if obj is not None:
             self.image_field.fill_string(obj)
@@ -285,11 +247,15 @@ class PlotWidget(QWidget):
         # if filename of a spectrum is set in the terminal
         if spec is not None:
             self.spec_field.fill_string(spec)
-            self.specChanged()
+            self.specPathChanged()
+
+        if refcenter is not None:
+            self.ra_input.setValue(refcenter[0])
+            self.dec_input.setValue(refcenter[1])
     #
         self.redraw_button.clicked.connect(self.redraw)
-        self.spec_field.changed_path.connect(self.specChanged)
-        self.image_field.changed_path.connect(self.imagePathChanged)
+        # self.spec_field.changed_path.connect(self.specChanged)
+        # self.image_field.changed_path.connect(self.imagePathChanged)
         self.PA_input.valueChanged.connect(self.updatePlots)
         self.ra_input.valueChanged.connect(self.updatePlots)
         self.dec_input.valueChanged.connect(self.updatePlots)
@@ -301,18 +267,18 @@ class PlotWidget(QWidget):
     #     self.dist_input.valueChanged.connect(self.kinematicsChanged)
     #     self.saveres_button.clicked.connect(self.save_rc)
     #     self.dist_checkbox.stateChanged.connect(self.kinematicsChanged)
-    #
+
     @Slot()
     def imagePathChanged(self):
         try:
             print('Opening image ', self.image_field.files)
-            self.obj_frame = fits.open(self.image_field.files)[0]
+            self.image_frame = fits.open(self.image_field.files)[0]
         except FileNotFoundError:
             print('IMAGE NOT FOUND')
-            self.obj_frame = None
+            self.image_frame = None
     #
     @Slot()
-    def specChanged(self):
+    def specPathChanged(self):
         try:
             print('Opening spectrum ', self.spec_field.files)
             self.PA_input.blockSignals(True)
@@ -329,43 +295,28 @@ class PlotWidget(QWidget):
         except FileNotFoundError:
             print('SPECTRUM NOT FOUND')
             self.spec_frame = None
-    #
-    # @Slot()
-    # def calc_dist(self):
-    #     if self.dist_checkbox.isChecked():
-    #         self.dist_input.setValue(self.vel_input.value() / 70.)
-    #         self.dist_input.setDisabled(True)
-    #     else:
-    #         self.dist_input.setDisabled(False)
-    #
-    # @Slot()
-    # def galFrameChanged(self):
-    #     self.updateValues()
-    #     self.galIm.plot_galaxy(self.gal_frame)
-    #     slits, masks = self.csvGraph.calc_rc(self.gal_frame, self.inclination,
-    #                                          self.sys_vel)
-    #     self.galIm.plot_slit(slits, masks)
-    #     self.gal_fig.draw()
-    #     self.plot_fig.draw()
-    #
-    # @Slot()
-    # def kinematicsChanged(self):
-    #     self.updateValues()
-    #     self.csvGraph.calc_rc(self.gal_frame, self.inclination, self.sys_vel,
-    #                           self.dist)
-    #     self.plot_fig.draw()
-    #
+            self.PA_input.blockSignals(False)
+            self.ra_input.blockSignals(False)
+            self.dec_input.blockSignals(False)
+            self.scale_input.blockSignals(False)
+
     @Slot()
     def redraw(self):
         """Redraw all plots. This function runs only when redraw button is clicked."""
-        self.updateValues()
+        self.specPathChanged()
+        self.imagePathChanged()
 
         # if the string with image frame path is not empty
-        if self.obj_frame:
+        if self.image_frame:
             self.image_fig.figure.clear()
-            # objectImage stores image, its wcs and current slit_position
-            self.objIm = objectImage(self.image_fig.figure, self.obj_frame)
-            self.objIm.plot_slit(self.slit)
+            # PlotImage stores image, its wcs and current slit_position
+            self.image_plot = PlotImage(self.image_fig.figure, self.image_frame)
+            self.image_plot.plot_slit(self.slit)
+
+        if self.spec_frame:
+            self.spec_fig.figure.clear()
+            self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame)
+
     #
     #     if self.csv_changed:
     #         self.plot_fig.figure.clear()
@@ -380,6 +331,7 @@ class PlotWidget(QWidget):
     #         self.csv_changed = False
     #
         self.image_fig.draw()
+        self.spec_fig.draw()
     #     self.plot_fig.draw()
     #
     # @Slot()
@@ -410,7 +362,7 @@ class PlotWidget(QWidget):
     #     self.dist = self.dist_input.value()
     #     self.gal_frame = self.gal_center.skyoffset_frame(rotation=self.PA)
 
-    def fillFiledsFromSlit(self, slit: slitParams):
+    def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
         self.scale_input.setValue(slit.scale)
         self.dec_input.setValue(slit.refcoord.dec)
@@ -420,7 +372,7 @@ class PlotWidget(QWidget):
     def updatePlots(self):
         self.updateValues()
         try:
-            self.objIm.plot_slit(self.slit)
+            self.image_plot.plot_slit(self.slit)
         except AttributeError:
             print('No object presented')
 
