@@ -5,6 +5,7 @@
 
 import sys
 
+import matplotlib.pyplot as plt
 import numpy as np
 # from scipy.stats import norm
 import matplotlib
@@ -13,9 +14,9 @@ from astropy.io import fits
 from astropy.wcs import WCS
 import astropy.units as u
 from astropy.coordinates import SkyCoord, FK5
+import reproject
+import time
 # from itertools import zip_longest, chain
-from matplotlib import colormaps
-from matplotlib import pyplot as plt
 
 # from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -46,10 +47,10 @@ class SlitParams:
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
         self.crpix = 0
         self.npix = 0
-        self.PA = 0 * u.deg
+        self.PA = 0
         self.scale = 1
         self.width = 1 * u.arcsec
-        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA)
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
     def fromHeader(self, hdr):
         if 'EPOCH' in hdr:
@@ -93,11 +94,11 @@ class SlitParams:
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
     def fromFields(self, RA, DEC, PA, scale):
-        self.PA = PA * u.deg
+        self.PA = PA
         self.scale = scale
         self.refcoord = SkyCoord(RA, DEC,
                                  unit=(u.hourangle, u.deg))
-        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA)
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
 
     def parse_tds_slit(self, slitname):
@@ -111,7 +112,109 @@ class SlitParams:
         return 1.0
 
 
-class objectImage():
+class InterpParams:
+    def __init__(self, image_hdu=None, slit=None):
+        self.image_hdu = image_hdu
+        if image_hdu is not None:
+            self.slit_wcs = WCS(image_hdu.header)
+            self.slit_hdr = image_hdu.header
+            self.image_rotated = image_hdu.data
+        if slit is not None:
+            self.slit = slit
+            self.make_slit_wcs(slit)
+        self.rotate_image()
+
+    def update(self, image_hdu=None, slit=None):
+        self.image_hdu = image_hdu
+        if image_hdu is not None:
+            self.slit_wcs = WCS(image_hdu.header)
+            self.slit_hdr = image_hdu.header
+            self.image_rotated = image_hdu.data
+        if slit is not None:
+            self.slit = slit
+            self.make_slit_wcs(slit)
+        self.rotate_image()
+
+    def get_rot_matrix(self, angle):
+        """Matrix to transform X-Y coordinates (right-handed) to pseudo lon-lat
+        (left-handed), assuming counter-clockwise rotation from Y-axis to
+        lat-axis."""
+        alph = np.radians(angle)
+        rot_matrix = np.array([[-np.cos(alph), np.sin(alph)], [np.sin(alph), np.cos(alph)]])
+        return rot_matrix
+
+    def make_slit_wcs(self, slit, shape=None, center=None, cdelt=None):
+        """Make wcs where y-axis corresponds to the slit PA.
+        Refpix of the wcs is the slit center.
+
+        Parameters
+        ----------
+        slit
+        shape
+        center
+        cdelt : float
+            cdelt in the resulting wcs, same for both axes, degrees
+
+        Returns
+        -------
+
+        """
+        slit_PA = slit.PA
+        slitpos = slit.refcoord.fk5
+
+        if cdelt is None:
+            cdelt = (0.3 * u.arcsec).to(u.deg).value
+        if shape is None:
+            shape = (500, 500)
+        if center is None:
+            center = [shape[0] / 2.0, shape[1] / 2.0]
+
+        w = WCS(naxis=2)
+        w.wcs.cdelt = [cdelt, cdelt]
+        w.wcs.cunit = [u.deg, u.deg]
+        w.wcs.ctype = ["RA---AIR", "DEC--AIR"]
+        w.wcs.pc = self.get_rot_matrix(slit_PA)
+        w.wcs.crpix = center
+        # print('Slit center: ', slitpos)
+        w.wcs.crval = [slitpos.ra.to(u.deg).value, slitpos.dec.to(u.deg).value]
+        # print('Slit center: ', w.wcs.crval)
+        w.pixel_shape = shape
+        w.wcs.latpole = 0.
+        w.wcs.lonpole = 180.
+        w.wcs.equinox = 2000.0
+
+        w_header = w.to_header()
+        w_header['NAXIS'] = 2
+        w_header['NAXIS1'], w_header['NAXIS2'] = w.pixel_shape
+
+        self.slit = slit
+        self.slit_wcs = w
+        self.slit_hdr = w_header
+        return w, w_header
+
+    def rotate_image(self, slit=None):
+        t = time.perf_counter()
+        if slit is not None:
+            self.slit = slit
+            self.make_slit_wcs(slit)
+        if self.image_hdu is not None:
+            self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
+                                                               self.slit_hdr)
+        print('reproject time ', time.perf_counter()-t)
+
+    @Slot()
+    def plot_image(self):
+        print("I'm here")
+        plt.figure()
+        plt.subplot(projection=self.slit_wcs)
+        plt.imshow(self.image_rotated)
+        plt.show()
+
+
+
+
+
+class PlotImage():
     '''Photometry of an object, its plot and slit shown on image'''
     def __init__(self, figure, frame):
         self.wcs = WCS(frame.header)
@@ -179,6 +282,7 @@ class PlotWidget(QWidget):
         self.spec_frame = None
         self.image_plot = None
         self.spec_plot = None
+        self.interp_params = InterpParams()
         self.slit = SlitParams()
 
         # create widgets
@@ -254,6 +358,7 @@ class PlotWidget(QWidget):
             self.dec_input.setValue(refcenter[1])
     #
         self.redraw_button.clicked.connect(self.redraw)
+        self.calculate_button.clicked.connect(self.interp_params.plot_image)
         # self.spec_field.changed_path.connect(self.specChanged)
         # self.image_field.changed_path.connect(self.imagePathChanged)
         self.PA_input.valueChanged.connect(self.updatePlots)
@@ -317,50 +422,15 @@ class PlotWidget(QWidget):
             self.spec_fig.figure.clear()
             self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame)
 
-    #
-    #     if self.csv_changed:
-    #         self.plot_fig.figure.clear()
-    #         data = [pd.read_csv(x) for x in self.csv_field.files]
-    #         self.csvGraph = csvPlot(data, self.plot_fig.figure)
-    #         slits, masks = self.csvGraph.calc_rc(self.gal_frame,
-    #                                              self.inclination,
-    #                                              self.sys_vel)
-    #         if self.galIm is not None:
-    #             self.galIm.plot_galaxy(self.gal_frame)
-    #             self.galIm.plot_slit(slits, masks)
-    #         self.csv_changed = False
-    #
+        if self.image_frame and self.spec_frame:
+            self.interp_params.update(self.image_frame, self.slit)
+
         self.image_fig.draw()
         self.spec_fig.draw()
-    #     self.plot_fig.draw()
-    #
-    # @Slot()
-    # def save_rc(self):
-    #     filenames = self.csv_field.return_filenames()
-    #     dataframes = self.csvGraph.return_rc()
-    #     regexps = "CSV (*.csv)"
-    #     for fname, dat in zip(filenames, dataframes):
-    #         fname_temp = '.'.join(fname.split('.')[:-1]) + '_rc.csv'
-    #         file_path = QFileDialog.getSaveFileName(self,
-    #                                                 "Save rotation curve",
-    #                                                 fname_temp,
-    #                                                 regexps)[0]
-    #         print('Saving ', file_path)
-    #         dat[['RA', 'DEC', 'Circular_v', 'Circular_v_err',
-    #              'R_pc', 'R_arcsec', 'mask1', 'mask2']].to_csv(file_path)
-    #
+
     def updateValues(self):
         self.slit.fromFields(self.ra_input.getAngle(), self.dec_input.getAngle(),
                              self.PA_input.value(), self.scale_input.value())
-    #     self.inclination = self.i_input.value() * u.deg
-    #     self.PA = self.PA_input.value() * u.deg
-    #     self.gal_center = SkyCoord(self.ra_input.getAngle(),
-    #                                self.dec_input.getAngle(),
-    #                                frame='icrs')
-    #     self.sys_vel = self.vel_input.value()
-    #     self.calc_dist()
-    #     self.dist = self.dist_input.value()
-    #     self.gal_frame = self.gal_center.skyoffset_frame(rotation=self.PA)
 
     def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
@@ -370,7 +440,11 @@ class PlotWidget(QWidget):
 
     @Slot()
     def updatePlots(self):
+        need_reproject = (np.abs(self.PA_input.value() - self.slit.PA) > 0.01)
         self.updateValues()
+        if need_reproject:
+            self.interp_params.rotate_image(self.slit)
+
         try:
             self.image_plot.plot_slit(self.slit)
         except AttributeError:
