@@ -339,6 +339,8 @@ class PlotWidget(QWidget):
         self.spec_plot = None
         self.interp_params = InterpParams()
         self.slit = SlitParams()
+        self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.PA * u.deg)
+
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -429,6 +431,8 @@ class PlotWidget(QWidget):
             self.ra_input.setValue(refcenter[0])
             self.dec_input.setValue(refcenter[1])
 
+        # self.updateValues('eq')
+
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.plot_rot_image)
         # self.spec_field.changed_path.connect(self.specChanged)
@@ -470,6 +474,7 @@ class PlotWidget(QWidget):
                 i.blockSignals(True)
             self.spec_frame = fits.open(self.spec_field.files)[0]
             self.slit.from_header(self.spec_frame.header)
+            self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.PA * u.deg)
             self.fillFiledsFromSlit(self.slit)
             for i in self.inputs_list:
                 i.blockSignals(False)
@@ -501,17 +506,65 @@ class PlotWidget(QWidget):
             pos, flux = self.interp_params.get_flux(self.slit)
             self.spec_plot.plot_image_flux(pos, flux)
 
+        self.updateValues('eq')
         self.image_fig.draw()
         self.spec_fig.draw()
 
     def updateValues(self, coord=None):
         for i in self.inputs_list:
             i.blockSignals(True)
+
+        if coord == 'eq':
+            self.im_from_eq()
+            self.slit_from_eq()
+        elif coord == 'im':
+            self.eq_from_im()
+            self.slit_from_eq()
+        elif coord == 'slit':
+            self.eq_from_slit()
+            self.im_from_eq()
+
         self.slit.from_fields(self.ra_input.getAngle(), self.dec_input.getAngle(),
                               self.PA_input.value(), self.scale_input.value())
-        self.spec_plot.update_scale(self.scale_input.value())
+
+        if coord == 'scale':
+            self.spec_plot.update_scale(self.scale_input.value())
+
         for i in self.inputs_list:
             i.blockSignals(False)
+
+    def im_from_eq(self):
+        if self.image_frame is not None:
+            eq = SkyCoord(self.ra_input.getAngle(), self.dec_input.getAngle(),
+                          unit=(u.hourangle, u.deg))
+            im = self.image_plot.wcs.world_to_pixel(eq)
+            self.x_input.setValue(im[0])
+            self.y_input.setValue(im[1])
+
+    def slit_from_eq(self):
+        if self.slit is not None:
+            eq = SkyCoord(self.ra_input.getAngle(), self.dec_input.getAngle(),
+                          unit=(u.hourangle, u.deg))
+            slit = eq.transform_to(self.init_slit_frame)
+            self.perp_input.setValue(slit.lon.to(u.arcsec).value)
+            self.along_input.setValue(slit.lat.to(u.arcsec).value)
+
+    def eq_from_slit(self):
+        if self.slit is not None:
+            slit = SkyCoord(self.perp_input.value() * u.arcsec,
+                            self.along_input.value() * u.arcsec,
+                            frame=self.init_slit_frame)
+            eq = slit.transform_to(FK5)
+            self.dec_input.setValue(eq.dec)
+            self.ra_input.setValue(eq.ra)
+
+    def eq_from_im(self):
+        if self.image_frame is not None:
+            im = [self.x_input.value(), self.y_input.value()]
+            eq = self.image_plot.wcs.pixel_to_world(*im)
+            self.dec_input.setValue(eq.dec)
+            self.ra_input.setValue(eq.ra)
+
 
     def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
