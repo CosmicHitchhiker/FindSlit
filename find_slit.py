@@ -20,6 +20,7 @@ import time
 
 # from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
+# noinspection PyUnresolvedReferences
 from matplotlib.backends.backend_qtagg import FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from PySide6.QtCore import Slot
@@ -42,6 +43,10 @@ from slitPolygon import slitPolygon
 matplotlib.use('QtAgg')
 
 
+def norm_vector(vec):
+    return vec / np.linalg.norm(vec)
+
+
 class SlitParams:
     def __init__(self):
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
@@ -49,10 +54,10 @@ class SlitParams:
         self.npix = 0
         self.PA = 0
         self.scale = 1
-        self.width = 1 * u.arcsec
+        self.width = 1
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
-    def fromHeader(self, hdr):
+    def from_header(self, hdr):
         if 'EPOCH' in hdr:
             equinox = "J" + str(hdr['EPOCH'])
             self.refcoord = SkyCoord(hdr['RA'], hdr['DEC'],
@@ -93,13 +98,12 @@ class SlitParams:
 
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
-    def fromFields(self, RA, DEC, PA, scale):
+    def from_fields(self, RA, DEC, PA, scale):
         self.PA = PA
         self.scale = scale
         self.refcoord = SkyCoord(RA, DEC,
                                  unit=(u.hourangle, u.deg))
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
-
 
     def parse_tds_slit(self, slitname):
         if slitname == '1asec':
@@ -113,6 +117,7 @@ class SlitParams:
 
 
 class InterpParams:
+    """Здесь повёрнутое изображение, можно брать его куски"""
     def __init__(self, image_hdu=None, slit=None):
         self.image_hdu = image_hdu
         if image_hdu is not None:
@@ -163,34 +168,33 @@ class InterpParams:
         slitpos = slit.refcoord.fk5
 
         if cdelt is None:
-            cdelt = (0.3 * u.arcsec).to(u.deg).value
+            cdelt = (0.5 * u.arcsec).to(u.deg).value
         if shape is None:
-            shape = (500, 500)
+            shape = (500, 1000)
         if center is None:
             center = [shape[0] / 2.0, shape[1] / 2.0]
 
-        w = WCS(naxis=2)
-        w.wcs.cdelt = [cdelt, cdelt]
-        w.wcs.cunit = [u.deg, u.deg]
-        w.wcs.ctype = ["RA---AIR", "DEC--AIR"]
-        w.wcs.pc = self.get_rot_matrix(slit_PA)
-        w.wcs.crpix = center
+        self.slit_wcs = WCS(naxis=2)
+        self.slit_wcs.wcs.cdelt = [cdelt, cdelt]
+        self.slit_wcs.wcs.cunit = [u.deg, u.deg]
+        self.slit_wcs.wcs.ctype = ["RA---AIR", "DEC--AIR"]
+        self.slit_wcs.wcs.pc = self.get_rot_matrix(slit_PA)
+        self.slit_wcs.wcs.crpix = center
         # print('Slit center: ', slitpos)
-        w.wcs.crval = [slitpos.ra.to(u.deg).value, slitpos.dec.to(u.deg).value]
-        # print('Slit center: ', w.wcs.crval)
-        w.pixel_shape = shape
-        w.wcs.latpole = 0.
-        w.wcs.lonpole = 180.
-        w.wcs.equinox = 2000.0
+        self.slit_wcs.wcs.crval = [slitpos.ra.to(u.deg).value, slitpos.dec.to(u.deg).value]
+        # print('Slit center: ', self.slit_wcs.wcs.crval)
+        self.slit_wcs.pixel_shape = shape
+        self.slit_wcs.wcs.latpole = 0.
+        self.slit_wcs.wcs.lonpole = 180.
+        self.slit_wcs.wcs.equinox = 2000.0
 
-        w_header = w.to_header()
+        w_header = self.slit_wcs.to_header()
         w_header['NAXIS'] = 2
-        w_header['NAXIS1'], w_header['NAXIS2'] = w.pixel_shape
+        w_header['NAXIS1'], w_header['NAXIS2'] = self.slit_wcs.pixel_shape
 
         self.slit = slit
-        self.slit_wcs = w
         self.slit_hdr = w_header
-        return w, w_header
+        return self.slit_wcs, w_header
 
     def rotate_image(self, slit=None):
         t = time.perf_counter()
@@ -203,19 +207,50 @@ class InterpParams:
         print('reproject time ', time.perf_counter()-t)
 
     @Slot()
-    def plot_image(self):
-        print("I'm here")
+    def plot_image(self, slitpos=None):
         plt.figure()
         plt.subplot(projection=self.slit_wcs)
         plt.imshow(self.image_rotated)
+
+        if slitpos is not None:
+            high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
+            low = slitpos.crpix * slitpos.scale * u.arcsec
+            halfw = slitpos.width * u.arcsec / 2.
+            x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
+            plt.plot(x, y, 'ro')
+
         plt.show()
 
+    def get_flux(self, slitpos, high=None, low=None, width=None):
+        if type(slitpos) is SlitParams:
+            high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
+            low = slitpos.crpix * slitpos.scale * u.arcsec
+            halfw = slitpos.width * u.arcsec / 2.
+            x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
+        else:
+            halfw = width / 2.0
+            x, y = self.slit_wcs.world_to_pixel(slitpos)
 
+        s_wcs = self.slit_wcs.wcs
+        cd_y = s_wcs.cdelt[1] * s_wcs.cunit[1]
+        low_pix = (low.to(u.deg) / cd_y.to(u.deg)).value
+        high_pix = (high.to(u.deg) / cd_y.to(u.deg)).value
+        y_min = int(y - low_pix)
+        y_max = int(y + high_pix + 1)
+        pos = np.arange(y_max - y_min) - low_pix
+        pos = pos * cd_y.to(u.arcsec)
 
+        cd_x = s_wcs.cdelt[0] * s_wcs.cunit[0]
+        hw_x = (halfw.to(u.deg) / cd_x.to(u.deg)).value
+        x_min = int(x - hw_x)
+        x_max = int(x + hw_x + 1)
+        flux = np.sum(self.image_rotated[y_min:y_max, x_min:x_max], axis=1)
 
+        return pos, flux
+        
 
-class PlotImage():
-    '''Photometry of an object, its plot and slit shown on image'''
+class PlotImage:
+    """Photometry of an object, its plot and slit shown on image"""
     def __init__(self, figure, frame):
         self.wcs = WCS(frame.header)
         self.figure = figure
@@ -225,7 +260,7 @@ class PlotImage():
         self.norm_im = simple_norm(self.image, 'linear', percent=99.3)
         self.plot_image()
 
-    def plot_image(self, gal_frame=None):
+    def plot_image(self):
         self.axes_obj.clear()
         self.axes_obj = self.figure.subplots(
             subplot_kw={'projection': self.wcs})
@@ -239,22 +274,24 @@ class PlotImage():
         h_up = (slit.npix - slit.crpix) * slit.scale * u.arcsec
         h_down = slit.crpix * slit.scale * u.arcsec
         s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
-                   theta=0 * u.deg,
-                   edgecolor='tab:olive', facecolor='none', lw=0.5,
-                   transform=self.axes_obj.get_transform(slit.frame))
+                        theta=0 * u.deg,
+                        edgecolor='tab:olive', facecolor='none', lw=0.5,
+                        transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(s)
         self.figure.canvas.draw()
 
 
-class PlotSpec():
+class PlotSpec:
     def __init__(self, figure, frame):
         self.figure = figure
         self.axes_obj = figure.subplots()
         x_range = slice(None, None)
         self.flux = np.sum(frame.data[:, x_range], axis=1)
+        self.norm_flux = norm_vector(self.flux)
         self.spectrum = frame.data
         self.hdr = frame.header
         self.pos = self.coords_from_header(axes=2)
+        self.spec_flux_line = None
         self.plot_spectrum_flux()
 
     def coords_from_header(self, axes=1):
@@ -266,13 +303,31 @@ class PlotSpec():
         coords = float(cdelt) * (pix - int(crpix)) + float(crval)
         return coords
 
-    def plot_spectrum_flux(self):
-        self.axes_obj.plot(self.pos, self.flux)
+    def update_scale(self, scale):
+        if self.hdr['CDELT2'] == scale:
+            return
 
+        self.hdr['CDELT2'] = scale
+        self.pos = self.coords_from_header(axes=2)
+        if self.spec_flux_line is not None:
+            self.spec_flux_line.set_xdata(self.pos)
+            self.axes_obj.relim()
+            self.axes_obj.autoscale_view()
+            self.figure.canvas.draw()
+            self.figure.canvas.flush_events()
+
+    def plot_spectrum_flux(self):
+        self.spec_flux_line,  = self.axes_obj.plot(self.pos, self.norm_flux, 'b')
+
+    def plot_image_flux(self, pos, flux):
+        if len(self.axes_obj.lines) > 1:
+            self.axes_obj.lines[1].remove()
+        self.axes_obj.plot(pos, norm_vector(flux), 'r')
+        self.figure.canvas.draw()
 
 
 class PlotWidget(QWidget):
-    '''main window'''
+    """main window"""
     def __init__(self, parent=None, spec=None, obj=None, refcenter=None, PA=0.,
                  scale=0.):
         super().__init__(parent)
@@ -358,7 +413,7 @@ class PlotWidget(QWidget):
             self.dec_input.setValue(refcenter[1])
     #
         self.redraw_button.clicked.connect(self.redraw)
-        self.calculate_button.clicked.connect(self.interp_params.plot_image)
+        self.calculate_button.clicked.connect(self.plot_rot_image)
         # self.spec_field.changed_path.connect(self.specChanged)
         # self.image_field.changed_path.connect(self.imagePathChanged)
         self.PA_input.valueChanged.connect(self.updatePlots)
@@ -374,6 +429,10 @@ class PlotWidget(QWidget):
     #     self.dist_checkbox.stateChanged.connect(self.kinematicsChanged)
 
     @Slot()
+    def plot_rot_image(self):
+        self.interp_params.plot_image(self.slit)
+
+    @Slot()
     def imagePathChanged(self):
         try:
             print('Opening image ', self.image_field.files)
@@ -381,7 +440,7 @@ class PlotWidget(QWidget):
         except FileNotFoundError:
             print('IMAGE NOT FOUND')
             self.image_frame = None
-    #
+
     @Slot()
     def specPathChanged(self):
         try:
@@ -391,7 +450,7 @@ class PlotWidget(QWidget):
             self.dec_input.blockSignals(True)
             self.scale_input.blockSignals(True)
             self.spec_frame = fits.open(self.spec_field.files)[0]
-            self.slit.fromHeader(self.spec_frame.header)
+            self.slit.from_header(self.spec_frame.header)
             self.fillFiledsFromSlit(self.slit)
             self.PA_input.blockSignals(False)
             self.ra_input.blockSignals(False)
@@ -429,8 +488,9 @@ class PlotWidget(QWidget):
         self.spec_fig.draw()
 
     def updateValues(self):
-        self.slit.fromFields(self.ra_input.getAngle(), self.dec_input.getAngle(),
-                             self.PA_input.value(), self.scale_input.value())
+        self.slit.from_fields(self.ra_input.getAngle(), self.dec_input.getAngle(),
+                              self.PA_input.value(), self.scale_input.value())
+        self.spec_plot.update_scale(self.scale_input.value())
 
     def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
@@ -440,16 +500,25 @@ class PlotWidget(QWidget):
 
     @Slot()
     def updatePlots(self):
-        need_reproject = (np.abs(self.PA_input.value() - self.slit.PA) > 0.01)
+        need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.PA) > 0.01)
         self.updateValues()
         if need_reproject:
             self.interp_params.rotate_image(self.slit)
 
         try:
             self.image_plot.plot_slit(self.slit)
+            # pos, flux = self.interp_params.get_flux(self.slit)
+            # self.spec_plot.plot_image_flux(pos, flux)
         except AttributeError:
             print('No object presented')
 
+        pos, flux = self.interp_params.get_flux(self.slit)
+        self.spec_plot.plot_image_flux(pos, flux)
+        # try:
+        #     pos, flux = self.interp_params.get_flux(self.slit)
+        #     # self.spec_plot.plot_image_flux(pos, flux)
+        # except AttributeError:
+        #     print("Can't plot flux")
 
 
 if __name__ == "__main__":
@@ -462,6 +531,6 @@ if __name__ == "__main__":
     pargs = parser.parse_args(sys.argv[1:])
 
     app = QApplication(sys.argv)
-    w = PlotWidget(None, pargs.spectrum, pargs.image)
-    w.show()
+    widg = PlotWidget(None, pargs.spectrum, pargs.image)
+    widg.show()
     sys.exit(app.exec())
