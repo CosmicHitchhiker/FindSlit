@@ -350,19 +350,32 @@ class PlotWidget(QWidget):
         self.spec_field = OpenFile(text='spectrum', mode='o')
 
         self.PA_input = QDoubleSpinBox()
-        self.PA_input.setKeyboardTracking(False)
         self.PA_input.setMaximum(360.0)
         self.PA_input.setMinimum(-360.0)
 
         self.scale_input = QDoubleSpinBox()
-        self.scale_input.setKeyboardTracking(False)
         # noinspection PyUnresolvedReferences
         self.scale_input.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
 
         self.ra_input = radecSpinBox(radec='ra')
         self.dec_input = radecSpinBox(radec='dec')
-        self.ra_input.setKeyboardTracking(False)
-        self.dec_input.setKeyboardTracking(False)
+
+        self.x_input = QDoubleSpinBox()
+        self.y_input = QDoubleSpinBox()
+        self.along_input = QDoubleSpinBox()
+        self.perp_input = QDoubleSpinBox()
+
+        self.inputs_list = [self.PA_input, self.scale_input,
+                            self.ra_input, self.dec_input,
+                            self.x_input, self.y_input,
+                            self.along_input, self.perp_input]
+
+        for i in self.inputs_list:
+            i.setKeyboardTracking(False)
+
+        for i in self.inputs_list[4:]:
+            i.setMinimum(-1e+6)
+            i.setMaximum(1e+6)
 
         self.redraw_button = QPushButton(text='Reopen files')
         self.saveres_button = QPushButton(text='Save Results')
@@ -376,11 +389,15 @@ class PlotWidget(QWidget):
         left_layout = QFormLayout()
         left_layout.addRow(self.spec_field)
         left_layout.addRow('RA', self.ra_input)
+        left_layout.addRow('x, px', self.x_input)
+        left_layout.addRow('shift normal to slit, "', self.perp_input)
         left_layout.addRow('PA', self.PA_input)
         left_layout.addRow(self.calculate_button)
         right_layout = QFormLayout()
         right_layout.addRow(self.image_field)
         right_layout.addRow('DEC', self.dec_input)
+        right_layout.addRow('y, px', self.y_input)
+        right_layout.addRow('shift along slit, "', self.along_input)
         right_layout.addRow('Scale "/pix', self.scale_input)
         right_layout.addRow(button_layout)
 
@@ -411,15 +428,19 @@ class PlotWidget(QWidget):
         if refcenter is not None:
             self.ra_input.setValue(refcenter[0])
             self.dec_input.setValue(refcenter[1])
-    #
+
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.plot_rot_image)
         # self.spec_field.changed_path.connect(self.specChanged)
         # self.image_field.changed_path.connect(self.imagePathChanged)
-        self.PA_input.valueChanged.connect(self.updatePlots)
-        self.ra_input.valueChanged.connect(self.updatePlots)
-        self.dec_input.valueChanged.connect(self.updatePlots)
-        self.scale_input.valueChanged.connect(self.updatePlots)
+        self.ra_input.valueChanged.connect(lambda: self.updatePlots('eq'))
+        self.dec_input.valueChanged.connect(lambda: self.updatePlots('eq'))
+        self.x_input.valueChanged.connect(lambda: self.updatePlots('im'))
+        self.y_input.valueChanged.connect(lambda: self.updatePlots('im'))
+        self.along_input.valueChanged.connect(lambda: self.updatePlots('slit'))
+        self.perp_input.valueChanged.connect(lambda: self.updatePlots('slit'))
+        self.PA_input.valueChanged.connect(lambda: self.updatePlots('pa'))
+        self.scale_input.valueChanged.connect(lambda: self.updatePlots('scale'))
     #     self.ra_input.valueChanged.connect(self.galFrameChanged)
     #     self.dec_input.valueChanged.connect(self.galFrameChanged)
     #     self.vel_input.valueChanged.connect(self.kinematicsChanged)
@@ -445,24 +466,18 @@ class PlotWidget(QWidget):
     def specPathChanged(self):
         try:
             print('Opening spectrum ', self.spec_field.files)
-            self.PA_input.blockSignals(True)
-            self.ra_input.blockSignals(True)
-            self.dec_input.blockSignals(True)
-            self.scale_input.blockSignals(True)
+            for i in self.inputs_list:
+                i.blockSignals(True)
             self.spec_frame = fits.open(self.spec_field.files)[0]
             self.slit.from_header(self.spec_frame.header)
             self.fillFiledsFromSlit(self.slit)
-            self.PA_input.blockSignals(False)
-            self.ra_input.blockSignals(False)
-            self.dec_input.blockSignals(False)
-            self.scale_input.blockSignals(False)
+            for i in self.inputs_list:
+                i.blockSignals(False)
         except FileNotFoundError:
             print('SPECTRUM NOT FOUND')
             self.spec_frame = None
-            self.PA_input.blockSignals(False)
-            self.ra_input.blockSignals(False)
-            self.dec_input.blockSignals(False)
-            self.scale_input.blockSignals(False)
+            for i in self.inputs_list:
+                i.blockSignals(False)
 
     @Slot()
     def redraw(self):
@@ -483,14 +498,20 @@ class PlotWidget(QWidget):
 
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
+            pos, flux = self.interp_params.get_flux(self.slit)
+            self.spec_plot.plot_image_flux(pos, flux)
 
         self.image_fig.draw()
         self.spec_fig.draw()
 
-    def updateValues(self):
+    def updateValues(self, coord=None):
+        for i in self.inputs_list:
+            i.blockSignals(True)
         self.slit.from_fields(self.ra_input.getAngle(), self.dec_input.getAngle(),
                               self.PA_input.value(), self.scale_input.value())
         self.spec_plot.update_scale(self.scale_input.value())
+        for i in self.inputs_list:
+            i.blockSignals(False)
 
     def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
@@ -499,9 +520,11 @@ class PlotWidget(QWidget):
         self.ra_input.setValue(slit.refcoord.ra)
 
     @Slot()
-    def updatePlots(self):
+    def updatePlots(self, coord=None):
+        print(coord)
+        # Сравниваем значение в поле со значением в интерп (не в слит!)
         need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.PA) > 0.01)
-        self.updateValues()
+        self.updateValues(coord)
         if need_reproject:
             self.interp_params.rotate_image(self.slit)
 
