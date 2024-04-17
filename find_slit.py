@@ -105,7 +105,8 @@ class SlitParams:
                                  unit=(u.hourangle, u.deg))
         self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
 
-    def parse_tds_slit(self, slitname):
+    @staticmethod
+    def parse_tds_slit(slitname):
         if slitname == '1asec':
             return 1.0
         elif slitname == '1.5asec':
@@ -140,7 +141,8 @@ class InterpParams:
             self.make_slit_wcs(slit)
         self.rotate_image()
 
-    def get_rot_matrix(self, angle):
+    @staticmethod
+    def get_rot_matrix(angle):
         """Matrix to transform X-Y coordinates (right-handed) to pseudo lon-lat
         (left-handed), assuming counter-clockwise rotation from Y-axis to
         lat-axis."""
@@ -215,9 +217,14 @@ class InterpParams:
         if slitpos is not None:
             high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
             low = slitpos.crpix * slitpos.scale * u.arcsec
-            halfw = slitpos.width * u.arcsec / 2.
+            top = SkyCoord(0*u.deg, high,
+                           frame=slitpos.frame)
+            bottom = SkyCoord(0*u.deg, -low,
+                              frame=slitpos.frame)
             x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
             plt.plot(x, y, 'ro')
+            plt.plot(*self.slit_wcs.world_to_pixel(bottom), 'bo')
+            plt.plot(*self.slit_wcs.world_to_pixel(top), 'bo')
 
         plt.show()
 
@@ -340,7 +347,6 @@ class PlotWidget(QWidget):
         self.interp_params = InterpParams()
         self.slit = SlitParams()
         self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.PA * u.deg)
-
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -564,7 +570,6 @@ class PlotWidget(QWidget):
             eq = self.image_plot.wcs.pixel_to_world(*im)
             self.dec_input.setValue(eq.dec)
             self.ra_input.setValue(eq.ra)
-
 
     def fillFiledsFromSlit(self, slit: SlitParams):
         self.PA_input.setValue(slit.PA)
