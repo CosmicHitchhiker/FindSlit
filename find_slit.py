@@ -52,10 +52,10 @@ class SlitParams:
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
         self.crpix = 0
         self.npix = 0
-        self.PA = 0
+        self.pa = 0
         self.scale = 1
         self.width = 1
-        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
 
     def from_header(self, hdr):
         if 'EPOCH' in hdr:
@@ -77,33 +77,33 @@ class SlitParams:
 
         if 'POSANG' in hdr:
             # TDS
-            self.PA = hdr['POSANG']
+            self.pa = hdr['POSANG']
         elif 'PARANGLE' in hdr and 'ROTANGLE' in hdr:
             # SCORPIO
-            self.PA = hdr['PARANGLE'] - hdr['ROTANGLE'] + 132.5
+            self.pa = hdr['PARANGLE'] - hdr['ROTANGLE'] + 132.5
         else:
-            self.PA = 0
+            self.pa = 0
 
         if self.scale < 0:
-            self.PA += 180
+            self.pa += 180
             self.scale *= -1
 
         # if PA not in [0,360) (including negative PA)
-        self.PA = self.PA - 360 * (self.PA // 360)
+        self.pa = self.pa - 360 * (self.pa // 360)
 
         if 'SLIT' in hdr:
             self.width = self.parse_tds_slit(hdr['SLIT'])
         else:
             self.width = 1.0
 
-        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
 
-    def from_fields(self, RA, DEC, PA, scale):
-        self.PA = PA
+    def from_fields(self, ra, dec, pa, scale):
+        self.pa = pa
         self.scale = scale
-        self.refcoord = SkyCoord(RA, DEC,
+        self.refcoord = SkyCoord(ra, dec,
                                  unit=(u.hourangle, u.deg))
-        self.frame = self.refcoord.skyoffset_frame(rotation=self.PA * u.deg)
+        self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
 
     @staticmethod
     def parse_tds_slit(slitname):
@@ -166,7 +166,7 @@ class InterpParams:
         -------
 
         """
-        slit_PA = slit.PA
+        slit_pa = slit.pa
         slitpos = slit.refcoord.fk5
 
         if cdelt is None:
@@ -180,7 +180,7 @@ class InterpParams:
         self.slit_wcs.wcs.cdelt = [cdelt, cdelt]
         self.slit_wcs.wcs.cunit = [u.deg, u.deg]
         self.slit_wcs.wcs.ctype = ["RA---AIR", "DEC--AIR"]
-        self.slit_wcs.wcs.pc = self.get_rot_matrix(slit_PA)
+        self.slit_wcs.wcs.pc = self.get_rot_matrix(slit_pa)
         self.slit_wcs.wcs.crpix = center
         # print('Slit center: ', slitpos)
         self.slit_wcs.wcs.crval = [slitpos.ra.to(u.deg).value, slitpos.dec.to(u.deg).value]
@@ -335,7 +335,7 @@ class PlotSpec:
 
 class PlotWidget(QWidget):
     """main window"""
-    def __init__(self, parent=None, spec=None, obj=None, refcenter=None, PA=0.,
+    def __init__(self, parent=None, spec=None, obj=None, refcenter=None, pa=0.,
                  scale=0.):
         super().__init__(parent)
         self.myStatus = QStatusBar()
@@ -346,7 +346,7 @@ class PlotWidget(QWidget):
         self.spec_plot = None
         self.interp_params = InterpParams()
         self.slit = SlitParams()
-        self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.PA * u.deg)
+        self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -422,35 +422,35 @@ class PlotWidget(QWidget):
         glayout.setRowStretch(2, 0)
         self.setLayout(glayout)
 
-        self.PA_input.setValue(PA)
+        self.PA_input.setValue(pa)
         self.scale_input.setValue(scale)
         # if filename of an image is set in the terminal
         if obj is not None:
             self.image_field.fill_string(obj)
-            self.imagePathChanged()
+            self.image_path_changed()
         # if filename of a spectrum is set in the terminal
         if spec is not None:
             self.spec_field.fill_string(spec)
-            self.specPathChanged()
+            self.spec_path_changed()
 
         if refcenter is not None:
             self.ra_input.setValue(refcenter[0])
             self.dec_input.setValue(refcenter[1])
 
-        # self.updateValues('eq')
+        # self.update_values('eq')
 
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.plot_rot_image)
         # self.spec_field.changed_path.connect(self.specChanged)
-        # self.image_field.changed_path.connect(self.imagePathChanged)
-        self.ra_input.valueChanged.connect(lambda: self.updatePlots('eq'))
-        self.dec_input.valueChanged.connect(lambda: self.updatePlots('eq'))
-        self.x_input.valueChanged.connect(lambda: self.updatePlots('im'))
-        self.y_input.valueChanged.connect(lambda: self.updatePlots('im'))
-        self.along_input.valueChanged.connect(lambda: self.updatePlots('slit'))
-        self.perp_input.valueChanged.connect(lambda: self.updatePlots('slit'))
-        self.PA_input.valueChanged.connect(lambda: self.updatePlots('pa'))
-        self.scale_input.valueChanged.connect(lambda: self.updatePlots('scale'))
+        # self.image_field.changed_path.connect(self.image_path_changed)
+        self.ra_input.valueChanged.connect(lambda: self.update_plots('eq'))
+        self.dec_input.valueChanged.connect(lambda: self.update_plots('eq'))
+        self.x_input.valueChanged.connect(lambda: self.update_plots('im'))
+        self.y_input.valueChanged.connect(lambda: self.update_plots('im'))
+        self.along_input.valueChanged.connect(lambda: self.update_plots('slit'))
+        self.perp_input.valueChanged.connect(lambda: self.update_plots('slit'))
+        self.PA_input.valueChanged.connect(lambda: self.update_plots('pa'))
+        self.scale_input.valueChanged.connect(lambda: self.update_plots('scale'))
     #     self.ra_input.valueChanged.connect(self.galFrameChanged)
     #     self.dec_input.valueChanged.connect(self.galFrameChanged)
     #     self.vel_input.valueChanged.connect(self.kinematicsChanged)
@@ -464,7 +464,7 @@ class PlotWidget(QWidget):
         self.interp_params.plot_image(self.slit)
 
     @Slot()
-    def imagePathChanged(self):
+    def image_path_changed(self):
         try:
             print('Opening image ', self.image_field.files)
             self.image_frame = fits.open(self.image_field.files)[0]
@@ -473,15 +473,15 @@ class PlotWidget(QWidget):
             self.image_frame = None
 
     @Slot()
-    def specPathChanged(self):
+    def spec_path_changed(self):
         try:
             print('Opening spectrum ', self.spec_field.files)
             for i in self.inputs_list:
                 i.blockSignals(True)
             self.spec_frame = fits.open(self.spec_field.files)[0]
             self.slit.from_header(self.spec_frame.header)
-            self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.PA * u.deg)
-            self.fillFiledsFromSlit(self.slit)
+            self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
+            self.fill_fileds_from_slit(self.slit)
             for i in self.inputs_list:
                 i.blockSignals(False)
         except FileNotFoundError:
@@ -493,8 +493,8 @@ class PlotWidget(QWidget):
     @Slot()
     def redraw(self):
         """Redraw all plots. This function runs only when redraw button is clicked."""
-        self.specPathChanged()
-        self.imagePathChanged()
+        self.spec_path_changed()
+        self.image_path_changed()
 
         # if the string with image frame path is not empty
         if self.image_frame:
@@ -512,11 +512,11 @@ class PlotWidget(QWidget):
             pos, flux = self.interp_params.get_flux(self.slit)
             self.spec_plot.plot_image_flux(pos, flux)
 
-        self.updateValues('eq')
+        self.update_values('eq')
         self.image_fig.draw()
         self.spec_fig.draw()
 
-    def updateValues(self, coord=None):
+    def update_values(self, coord=None):
         for i in self.inputs_list:
             i.blockSignals(True)
 
@@ -571,18 +571,18 @@ class PlotWidget(QWidget):
             self.dec_input.setValue(eq.dec)
             self.ra_input.setValue(eq.ra)
 
-    def fillFiledsFromSlit(self, slit: SlitParams):
-        self.PA_input.setValue(slit.PA)
+    def fill_fileds_from_slit(self, slit: SlitParams):
+        self.PA_input.setValue(slit.pa)
         self.scale_input.setValue(slit.scale)
         self.dec_input.setValue(slit.refcoord.dec)
         self.ra_input.setValue(slit.refcoord.ra)
 
     @Slot()
-    def updatePlots(self, coord=None):
+    def update_plots(self, coord=None):
         print(coord)
         # Сравниваем значение в поле со значением в интерп (не в слит!)
-        need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.PA) > 0.01)
-        self.updateValues(coord)
+        need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.pa) > 0.01)
+        self.update_values(coord)
         if need_reproject:
             self.interp_params.rotate_image(self.slit)
 
