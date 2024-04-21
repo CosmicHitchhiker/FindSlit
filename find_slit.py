@@ -16,7 +16,7 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord, FK5
 import reproject
 import time
-# from itertools import zip_longest, chain
+from scipy import optimize
 
 # from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -45,6 +45,10 @@ matplotlib.use('QtAgg')
 
 def norm_vector(vec):
     return vec / np.linalg.norm(vec)
+
+
+def correlation(vec1, vec2):
+    return np.arccos(np.sum(vec1 * vec2))
 
 
 class SlitParams:
@@ -228,8 +232,11 @@ class InterpParams:
 
         plt.show()
 
-    def get_flux(self, slitpos, high=None, low=None, width=None):
+    def get_flux(self, slitpos, high=None, low=None, width=None, init_pos=None):
         if type(slitpos) is SlitParams:
+            if np.abs(slitpos.pa - self.slit.pa) > 0.01:
+                print('yes')
+                self.rotate_image(slitpos)
             high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
             low = slitpos.crpix * slitpos.scale * u.arcsec
             halfw = slitpos.width * u.arcsec / 2.
@@ -245,13 +252,17 @@ class InterpParams:
         y_min = int(y - low_pix)
         y_max = int(y + high_pix + 1)
         pos = np.arange(y_max - y_min) - low_pix
-        pos = pos * cd_y.to(u.arcsec)
+        pos = pos * cd_y.to(u.arcsec).value
 
         cd_x = s_wcs.cdelt[0] * s_wcs.cunit[0]
         hw_x = (halfw.to(u.deg) / cd_x.to(u.deg)).value
         x_min = int(x - hw_x)
         x_max = int(x + hw_x + 1)
         flux = np.sum(self.image_rotated[y_min:y_max, x_min:x_max], axis=1)
+
+        if init_pos is not None:
+            flux = np.interp(init_pos, pos, flux)
+            pos = init_pos
 
         return pos, flux
         
@@ -440,7 +451,7 @@ class PlotWidget(QWidget):
         # self.update_values('eq')
 
         self.redraw_button.clicked.connect(self.redraw)
-        self.calculate_button.clicked.connect(self.plot_rot_image)
+        self.calculate_button.clicked.connect(self.find_optimal_parameters)
         # self.spec_field.changed_path.connect(self.specChanged)
         # self.image_field.changed_path.connect(self.image_path_changed)
         self.ra_input.valueChanged.connect(lambda: self.update_plots('eq'))
@@ -509,7 +520,8 @@ class PlotWidget(QWidget):
 
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
-            pos, flux = self.interp_params.get_flux(self.slit)
+            pos, flux = self.interp_params.get_flux(self.slit,
+                                                init_pos=self.spec_plot.pos)
             self.spec_plot.plot_image_flux(pos, flux)
 
         self.update_values('eq')
@@ -579,7 +591,6 @@ class PlotWidget(QWidget):
 
     @Slot()
     def update_plots(self, coord=None):
-        print(coord)
         # Сравниваем значение в поле со значением в интерп (не в слит!)
         need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.pa) > 0.01)
         self.update_values(coord)
@@ -593,13 +604,81 @@ class PlotWidget(QWidget):
         except AttributeError:
             print('No object presented')
 
-        pos, flux = self.interp_params.get_flux(self.slit)
+        pos, flux = self.interp_params.get_flux(self.slit,
+                                                init_pos=self.spec_plot.pos)
         self.spec_plot.plot_image_flux(pos, flux)
         # try:
         #     pos, flux = self.interp_params.get_flux(self.slit)
         #     # self.spec_plot.plot_image_flux(pos, flux)
         # except AttributeError:
         #     print("Can't plot flux")
+
+    @Slot()
+    def find_optimal_parameters(self):
+        params = [self.slit.refcoord.ra.to(u.hourangle).value,
+                  self.slit.refcoord.dec.to(u.deg).value,
+                  self.slit.pa,
+                  self.slit.scale]
+        dra = (60 * u.arcsec).to(u.hourangle).value
+        ddec = (60 * u.arcsec).to(u.deg).value
+        bounds = [(params[0] - dra, params[0] + dra),
+                  (params[1] - ddec, params[1] + ddec),
+                  (params[2], params[2]),
+                  (params[3] * 0.9, params[3] * 1.1)]
+        print(self.qfunc_eq(params, self.spec_plot, self.interp_params,
+                            self.spec_frame.header))
+        optargs = (self.spec_plot, self.interp_params,
+                            self.spec_frame.header)
+        # good_params = optimize.minimize(self.qfunc_eq, params,
+        #                                 args=optargs, bounds=bounds,
+        #                                 method='Nelder-Mead')
+        good_params = self.try_different_minimizers(self.qfunc_eq, params,
+                                                    optargs, bounds)
+        print(good_params)
+        print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
+                            self.spec_frame.header))
+        self.slit.from_fields(good_params.x[0] * u.hourangle,
+                              good_params.x[1] * u.deg,
+                              good_params.x[2], good_params.x[3])
+        self.fill_fileds_from_slit(self.slit)
+        self.update_plots()
+
+    def try_different_minimizers(self, func, params, optargs, bounds):
+        methods = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP']
+        q = func(params, *optargs)
+        good_result = False
+        while not good_result:
+            q_old = q
+            for m in methods:
+                print(m)
+                res = optimize.minimize(func, params,
+                                        args=optargs, bounds=bounds,
+                                        method=m)
+                if res.fun < q:
+                    q = res.fun
+                    print('BEST!!!', m)
+                    best_params = res.x
+            params = best_params
+            good_result = (q == q_old)
+        return res
+
+
+
+
+    @staticmethod
+    def qfunc_eq(params, plotspec, interpparams, hdr):
+        ra, dec, pa, scale = params
+
+        loc_slit = SlitParams()
+        loc_slit.from_header(hdr)
+        loc_slit.from_fields(ra, dec, pa, scale)
+        pos, flux = interpparams.get_flux(loc_slit,
+                                          init_pos=plotspec.pos)
+        flux = norm_vector(flux)
+        spec_flux = norm_vector(plotspec.flux)
+        q = correlation(flux, spec_flux)
+        return q
+
 
 
 if __name__ == "__main__":
