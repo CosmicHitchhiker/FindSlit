@@ -40,6 +40,8 @@ from PySide6.QtWidgets import (
 from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
 from slitPolygon import slitPolygon
+from SetBorders import SetBorders
+
 matplotlib.use('QtAgg')
 
 
@@ -123,6 +125,7 @@ class SlitParams:
 
 class InterpParams:
     """Здесь повёрнутое изображение, можно брать его куски"""
+
     def __init__(self, image_hdu=None, slit=None):
         self.image_hdu = image_hdu
         if image_hdu is not None:
@@ -210,7 +213,7 @@ class InterpParams:
         if self.image_hdu is not None:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
-        print('reproject time ', time.perf_counter()-t)
+        print('reproject time ', time.perf_counter() - t)
 
     @Slot()
     def plot_image(self, slitpos=None):
@@ -221,9 +224,9 @@ class InterpParams:
         if slitpos is not None:
             high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
             low = slitpos.crpix * slitpos.scale * u.arcsec
-            top = SkyCoord(0*u.deg, high,
+            top = SkyCoord(0 * u.deg, high,
                            frame=slitpos.frame)
-            bottom = SkyCoord(0*u.deg, -low,
+            bottom = SkyCoord(0 * u.deg, -low,
                               frame=slitpos.frame)
             x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
             plt.plot(x, y, 'ro')
@@ -265,10 +268,11 @@ class InterpParams:
             pos = init_pos
 
         return pos, flux
-        
+
 
 class PlotImage:
     """Photometry of an object, its plot and slit shown on image"""
+
     def __init__(self, figure, frame):
         self.wcs = WCS(frame.header)
         self.figure = figure
@@ -313,10 +317,10 @@ class PlotSpec:
         self.plot_spectrum_flux()
 
     def coords_from_header(self, axes=1):
-        naxis = self.hdr['NAXIS'+str(axes)]
-        cdelt = self.hdr['CDELT'+str(axes)]
-        crpix = self.hdr['CRPIX'+str(axes)]
-        crval = self.hdr['CRVAL'+str(axes)]
+        naxis = self.hdr['NAXIS' + str(axes)]
+        cdelt = self.hdr['CDELT' + str(axes)]
+        crpix = self.hdr['CRPIX' + str(axes)]
+        crval = self.hdr['CRVAL' + str(axes)]
         pix = np.arange(int(naxis)) + 1
         coords = float(cdelt) * (pix - int(crpix)) + float(crval)
         return coords
@@ -335,7 +339,7 @@ class PlotSpec:
             self.figure.canvas.flush_events()
 
     def plot_spectrum_flux(self):
-        self.spec_flux_line,  = self.axes_obj.plot(self.pos, self.norm_flux, 'b')
+        self.spec_flux_line, = self.axes_obj.plot(self.pos, self.norm_flux, 'b')
 
     def plot_image_flux(self, pos, flux):
         if len(self.axes_obj.lines) > 1:
@@ -346,6 +350,7 @@ class PlotSpec:
 
 class PlotWidget(QWidget):
     """main window"""
+
     def __init__(self, parent=None, spec=None, obj=None, refcenter=None, pa=0.,
                  scale=0.):
         super().__init__(parent)
@@ -357,7 +362,8 @@ class PlotWidget(QWidget):
         self.spec_plot = None
         self.interp_params = InterpParams()
         self.slit = SlitParams()
-        self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
+        self.init_slit_frame = self.slit.frame
+        self.border_w = SetBorders(self)
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -399,11 +405,16 @@ class PlotWidget(QWidget):
         self.redraw_button = QPushButton(text='Reopen files')
         self.saveres_button = QPushButton(text='Save Results')
         self.calculate_button = QPushButton(text='Find optimal parameters')
+        self.border_button = QPushButton(text='Set borders')
 
         # Layout
-        button_layout = QHBoxLayout()
-        button_layout.addWidget(self.redraw_button)
-        button_layout.addWidget(self.saveres_button)
+        r_button_layout = QHBoxLayout()
+        r_button_layout.addWidget(self.redraw_button)
+        r_button_layout.addWidget(self.saveres_button)
+
+        l_button_layout = QHBoxLayout()
+        l_button_layout.addWidget(self.calculate_button)
+        l_button_layout.addWidget(self.border_button)
 
         left_layout = QFormLayout()
         left_layout.addRow(self.spec_field)
@@ -411,14 +422,14 @@ class PlotWidget(QWidget):
         left_layout.addRow('x, px', self.x_input)
         left_layout.addRow('shift normal to slit, "', self.perp_input)
         left_layout.addRow('PA', self.PA_input)
-        left_layout.addRow(self.calculate_button)
+        left_layout.addRow(l_button_layout)
         right_layout = QFormLayout()
         right_layout.addRow(self.image_field)
         right_layout.addRow('DEC', self.dec_input)
         right_layout.addRow('y, px', self.y_input)
         right_layout.addRow('shift along slit, "', self.along_input)
         right_layout.addRow('Scale "/pix', self.scale_input)
-        right_layout.addRow(button_layout)
+        right_layout.addRow(r_button_layout)
 
         glayout = QGridLayout()
         glayout.addWidget(self.toolbar_spec, 0, 0)
@@ -452,8 +463,7 @@ class PlotWidget(QWidget):
 
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.find_optimal_parameters)
-        # self.spec_field.changed_path.connect(self.specChanged)
-        # self.image_field.changed_path.connect(self.image_path_changed)
+        self.border_button.clicked.connect(self.set_borders)
         self.ra_input.valueChanged.connect(lambda: self.update_plots('eq'))
         self.dec_input.valueChanged.connect(lambda: self.update_plots('eq'))
         self.x_input.valueChanged.connect(lambda: self.update_plots('im'))
@@ -462,13 +472,6 @@ class PlotWidget(QWidget):
         self.perp_input.valueChanged.connect(lambda: self.update_plots('slit'))
         self.PA_input.valueChanged.connect(lambda: self.update_plots('pa'))
         self.scale_input.valueChanged.connect(lambda: self.update_plots('scale'))
-    #     self.ra_input.valueChanged.connect(self.galFrameChanged)
-    #     self.dec_input.valueChanged.connect(self.galFrameChanged)
-    #     self.vel_input.valueChanged.connect(self.kinematicsChanged)
-    #     self.i_input.valueChanged.connect(self.kinematicsChanged)
-    #     self.dist_input.valueChanged.connect(self.kinematicsChanged)
-    #     self.saveres_button.clicked.connect(self.save_rc)
-    #     self.dist_checkbox.stateChanged.connect(self.kinematicsChanged)
 
     @Slot()
     def plot_rot_image(self):
@@ -493,6 +496,7 @@ class PlotWidget(QWidget):
             self.slit.from_header(self.spec_frame.header)
             self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
             self.fill_fileds_from_slit(self.slit)
+            self.border_w.add_image(self.spec_frame.data)
             for i in self.inputs_list:
                 i.blockSignals(False)
         except FileNotFoundError:
@@ -521,7 +525,7 @@ class PlotWidget(QWidget):
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
             pos, flux = self.interp_params.get_flux(self.slit,
-                                                init_pos=self.spec_plot.pos)
+                                                    init_pos=self.spec_plot.pos)
             self.spec_plot.plot_image_flux(pos, flux)
 
         self.update_values('eq')
@@ -628,7 +632,7 @@ class PlotWidget(QWidget):
         print(self.qfunc_eq(params, self.spec_plot, self.interp_params,
                             self.spec_frame.header))
         optargs = (self.spec_plot, self.interp_params,
-                            self.spec_frame.header)
+                   self.spec_frame.header)
         # good_params = optimize.minimize(self.qfunc_eq, params,
         #                                 args=optargs, bounds=bounds,
         #                                 method='Nelder-Mead')
@@ -643,9 +647,12 @@ class PlotWidget(QWidget):
         self.fill_fileds_from_slit(self.slit)
         self.update_plots()
 
-    def try_different_minimizers(self, func, params, optargs, bounds):
+    @staticmethod
+    def try_different_minimizers(func, params, optargs, bounds):
         methods = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP']
+        res = None
         q = func(params, *optargs)
+        best_params = params
         good_result = False
         while not good_result:
             q_old = q
@@ -662,8 +669,10 @@ class PlotWidget(QWidget):
             good_result = (q == q_old)
         return res
 
-
-
+    @Slot()
+    def set_borders(self):
+        self.border_w.show()
+        print(self.border_w.counter)
 
     @staticmethod
     def qfunc_eq(params, plotspec, interpparams, hdr):
@@ -680,9 +689,9 @@ class PlotWidget(QWidget):
         return q
 
 
-
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--spectrum', nargs='?', default=None,
                         help='''long-slit spectrum''')
