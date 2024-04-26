@@ -496,7 +496,7 @@ class PlotWidget(QWidget):
             self.slit.from_header(self.spec_frame.header)
             self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
             self.fill_fileds_from_slit(self.slit)
-            self.border_w.add_image(self.spec_frame.data)
+            self.border_w.add_image(self.spec_frame)
             for i in self.inputs_list:
                 i.blockSignals(False)
         except FileNotFoundError:
