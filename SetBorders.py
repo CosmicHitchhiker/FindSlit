@@ -29,8 +29,9 @@ class WavelengthTransform:
         self.lmax = self.x_to_wl(header['NAXIS1'])
 
 
+# noinspection PyTypeChecker
 class LabledSpinBox(QWidget):
-    valueChanged = Signal((int,),(float,))
+    valueChanged = Signal((int,), (float,))
 
     def __init__(self, text='', minv=0, maxv=100, value=0, val_type='int'):
         super().__init__()
@@ -69,6 +70,7 @@ class LabledSpinBox(QWidget):
         self.box.setRange(minv, maxv)
 
 
+# noinspection PyTypeChecker
 class PairLabledSpinBox(QWidget):
     minChanged = Signal((float,), (int,))
     maxChanged = Signal((float,), (int,))
@@ -102,6 +104,12 @@ class PairLabledSpinBox(QWidget):
         self.minbox.set_value(minv)
         self.maxbox.set_value(maxv)
 
+    def get_min(self):
+        return self.minbox.value()
+
+    def get_max(self):
+        return self.maxbox.value()
+
 
 class BorderLine:
     def __init__(self, ax, pos, ltype='h'):
@@ -127,8 +135,8 @@ class BorderLine:
         self.fig.canvas.draw()
 
 
-
 class SetBorders(QDialog):
+    newBorders = Signal(list)
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -143,7 +151,9 @@ class SetBorders(QDialog):
         self.cancel_button = QPushButton(text='Cancel')
         self.img = None
         self.norm_im = None
+        self.cut_img = None
         self.wl_transform = None
+        self.borders = []
         self.minx_line = BorderLine(self.ax, 0, 'v')
         self.maxx_line = BorderLine(self.ax, 0, 'v')
         self.miny_line = BorderLine(self.ax, 0, 'h')
@@ -155,21 +165,10 @@ class SetBorders(QDialog):
         self.l_box = PairLabledSpinBox('l_min', 'l_max',
                                        val_type='float')
 
-        # self.min_x = LabledSpinBox('x_min')
-        # self.max_x = LabledSpinBox('x_max')
-        # self.min_y = LabledSpinBox('y_min')
-        # self.max_y = LabledSpinBox('y_max')
-        # self.min_l = LabledSpinBox('l_min')
-        # self.max_l = LabledSpinBox('l_max')
-        # self.spinboxes = [self.min_x, self.max_x, self.min_y,
-        #                   self.max_y, self.min_l, self.max_l]
-        # [x.box.setDecimals(0) for x in self.spinboxes[:4]]
-
         val_layout = QHBoxLayout()
         val_layout.addWidget(self.x_box)
         val_layout.addWidget(self.y_box)
         val_layout.addWidget(self.l_box)
-        # [val_layout.addWidget(x) for x in self.spinboxes]
 
         b_layout = QHBoxLayout()
         b_layout.addWidget(self.cancel_button)
@@ -179,18 +178,15 @@ class SetBorders(QDialog):
         layout.addWidget(self.fig)
         layout.addLayout(val_layout)
         layout.addLayout(b_layout)
+        layout.setStretch(1, 1)
         self.setLayout(layout)
 
         self.x_box.minChanged.connect(self.minx_line.change_pos)
         self.x_box.maxChanged.connect(self.maxx_line.change_pos)
         self.y_box.minChanged.connect(self.miny_line.change_pos)
         self.y_box.maxChanged.connect(self.maxy_line.change_pos)
-
-    @Slot()
-    def increase_counter(self, num=None):
-        if num is not None:
-            print(num)
-        self.counter += 1
+        self.cancel_button.clicked.connect(self.reject)
+        self.apply_button.clicked.connect(self.apply_borders)
 
     def add_image(self, frame):
         self.img = frame.data
@@ -219,9 +215,14 @@ class SetBorders(QDialog):
         self.miny_line.change_pos(miny-1)
         self.maxy_line.change_pos(maxy-1)
 
-
-
-        # for box, val in zip(self.spinboxes, vals):
-        #     box.set_value(val)
+        self.apply_borders()
 
         self.fig.draw()
+
+    def apply_borders(self):
+        self.borders = [self.x_box.get_min() - 1,
+                        self.x_box.get_max(),
+                        self.y_box.get_min() - 1,
+                        self.y_box.get_max()]
+
+        super().accept()

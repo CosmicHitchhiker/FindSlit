@@ -57,6 +57,7 @@ class SlitParams:
     def __init__(self):
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
         self.crpix = 0
+        self.crpix_init = 0
         self.npix = 0
         self.pa = 0
         self.scale = 1
@@ -103,6 +104,7 @@ class SlitParams:
             self.width = 1.0
 
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
+        self.crpix_init = self.crpix
 
     def from_fields(self, ra, dec, pa, scale):
         self.pa = pa
@@ -110,6 +112,11 @@ class SlitParams:
         self.refcoord = SkyCoord(ra, dec,
                                  unit=(u.hourangle, u.deg))
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
+
+    def add_limits(self, lims):
+        miny, maxy = lims[2], lims[3]
+        self.crpix = self.crpix_init - miny
+        self.npix = maxy - miny + 1
 
     @staticmethod
     def parse_tds_slit(slitname):
@@ -304,15 +311,20 @@ class PlotImage:
 
 
 class PlotSpec:
-    def __init__(self, figure, frame):
+    def __init__(self, figure, frame, borders=None):
         self.figure = figure
         self.axes_obj = figure.subplots()
-        x_range = slice(None, None)
-        self.flux = np.sum(frame.data[:, x_range], axis=1)
+        if borders is not None:
+            x_range = slice(borders[0], borders[1])
+            y_range = slice(borders[2], borders[3])
+        else:
+            x_range = slice(None, None)
+            y_range = slice(None, None)
+        self.flux = np.sum(frame.data[y_range, x_range], axis=1)
         self.norm_flux = norm_vector(self.flux)
         self.spectrum = frame.data
         self.hdr = frame.header
-        self.pos = self.coords_from_header(axes=2)
+        self.pos = self.coords_from_header(axes=2)[y_range]
         self.spec_flux_line = None
         self.plot_spectrum_flux()
 
@@ -364,6 +376,7 @@ class PlotWidget(QWidget):
         self.slit = SlitParams()
         self.init_slit_frame = self.slit.frame
         self.border_w = SetBorders(self)
+        self.borders = None
 
         # create widgets
         self.spec_fig = FigureCanvas(Figure(figsize=(5, 3)))
@@ -472,6 +485,7 @@ class PlotWidget(QWidget):
         self.perp_input.valueChanged.connect(lambda: self.update_plots('slit'))
         self.PA_input.valueChanged.connect(lambda: self.update_plots('pa'))
         self.scale_input.valueChanged.connect(lambda: self.update_plots('scale'))
+        self.border_w.accepted.connect(self.spec_borders_changed)
 
     @Slot()
     def plot_rot_image(self):
@@ -497,6 +511,7 @@ class PlotWidget(QWidget):
             self.init_slit_frame = self.slit.refcoord.skyoffset_frame(rotation=self.slit.pa * u.deg)
             self.fill_fileds_from_slit(self.slit)
             self.border_w.add_image(self.spec_frame)
+            self.borders = self.border_w.borders
             for i in self.inputs_list:
                 i.blockSignals(False)
         except FileNotFoundError:
@@ -504,6 +519,27 @@ class PlotWidget(QWidget):
             self.spec_frame = None
             for i in self.inputs_list:
                 i.blockSignals(False)
+
+    @Slot()
+    def spec_borders_changed(self):
+        self.borders = self.border_w.borders
+        self.slit.add_limits(self.borders)
+        try:
+            self.image_plot.plot_slit(self.slit)
+        except AttributeError:
+            print('No object presented')
+
+        if self.spec_frame:
+            self.spec_fig.figure.clear()
+            self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame,
+                                      self.borders)
+
+        if self.image_frame and self.spec_frame:
+            self.interp_params.update(self.image_frame, self.slit)
+            pos, flux = self.interp_params.get_flux(self.slit,
+                                                    init_pos=self.spec_plot.pos)
+            self.spec_plot.plot_image_flux(pos, flux)
+
 
     @Slot()
     def redraw(self):
@@ -672,7 +708,6 @@ class PlotWidget(QWidget):
     @Slot()
     def set_borders(self):
         self.border_w.show()
-        print(self.border_w.counter)
 
     @staticmethod
     def qfunc_eq(params, plotspec, interpparams, hdr):
