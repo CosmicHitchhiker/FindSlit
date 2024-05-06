@@ -1,3 +1,4 @@
+import numpy as np
 from astropy.coordinates import Angle
 import astropy.units as u
 from PySide6.QtCore import Slot, Signal
@@ -34,7 +35,11 @@ class radecSpinBox(QAbstractSpinBox):
 
         self.setAccelerated(True)
         self.setKeyboardTracking(False)
-        self.angle = Angle(value, unit=self.unit)
+
+        self.precision = 1
+        self.dec_precision = self.calc_dec_precision()
+        self.angle = Angle(0, unit=self.unit)
+        self.setAngle(value)
 
         self.editingFinished.connect(self.valueFromText)
 
@@ -43,12 +48,12 @@ class radecSpinBox(QAbstractSpinBox):
 
     def textFromValue(self, val=None):
         if val is None:
-            return self.angle.to_string(unit=self.unit, sep=':')
-        elif isinstance(val, (float, int)):
+            return self.angle.to_string(unit=self.unit, sep=':', precision=self.precision)
+        elif isinstance(val, (float, int, str)):
             ang = Angle(val, self.unit)
-            return ang.to_string(unit=self.unit, sep=':')
+            return ang.to_string(unit=self.unit, sep=':', precision=self.precision)
         elif isinstance(val, Angle):
-            return val.to_string(unit=self.unit, sep=':')
+            return val.to_string(unit=self.unit, sep=':', precision=self.precision)
         else:
             raise TypeError
 
@@ -57,7 +62,7 @@ class radecSpinBox(QAbstractSpinBox):
         if not self.hasAcceptableInput():
             self.line.setText(self.fixup(self.text()))
         text = self.text()
-        self.angle = Angle(text, unit=self.unit)
+        self.setAngle(text)
         self.checkBoundaries()
         self.line.setText(self.textFromValue(self.angle.value))
         self.valueChanged.emit(self.angle)
@@ -77,36 +82,52 @@ class radecSpinBox(QAbstractSpinBox):
                               | QAbstractSpinBox.StepUpEnabled
                               | QAbstractSpinBox.StepDownEnabled)
         if self.angle >= self.maximum:
-            self.angle = self.maximum
+            self.maximum
             self.enabled_steps ^= QAbstractSpinBox.StepUpEnabled
         if self.angle <= self.minimum:
-            self.angle = self.minimum
+            self.minimum
             self.enabled_steps ^= QAbstractSpinBox.StepDownEnabled
         self.stepEnabled()
         self.update()
         print(self.enabled_steps)
 
-
-
     def getAngle(self):
-        return self.angle
+        val = round(self.angle.value, self.dec_precision)
+        return Angle(val, unit=self.unit)
+
+    def setAngle(self, angle):
+        text = self.textFromValue(angle)
+        self.angle = Angle(text, unit=self.unit)
+        self.line.setText(self.textFromValue(self.angle.value))
 
     def setValue(self, value):
-        self.angle = Angle(value, unit=self.unit)
-        self.line.setText(self.textFromValue(self.angle.value))
+        self.setAngle(value)
         self.valueChanged.emit(self.angle)
 
     def validate(self, text, pos):
+        """This method is called every time the text in radecSpinBox is changed
+
+        :param text: str, text in the spinbpx
+        :param pos: int, coursor position
+        :return: QValidator.Acceptable if everythig is ok
+                 QValidator.Intermediate if need to call fixup
+        """
         # print('validating')
         try:
-            self.angle = Angle(text, unit=self.unit)
+            Angle(text, unit=self.unit)
         except ValueError:
             # return QValidator.Invalid
             print('need to complete')
             return QValidator.Intermediate
-        # return QValidator.Invalid
         return QValidator.Acceptable
 
     def fixup(self, text):
         print('fix')
         return '0:0:0'
+
+    def calc_dec_precision(self):
+        minval_sec = 10 ** (-self.precision)
+        minval_deg = minval_sec / 3600.
+        return int(-np.log10(minval_deg))
+
+
