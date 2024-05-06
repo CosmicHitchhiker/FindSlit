@@ -625,10 +625,14 @@ class PlotWidget(QWidget):
             self.ra_input.setValue(eq.ra)
 
     def fill_fileds_from_slit(self, slit: SlitParams):
+        for i in self.inputs_list:
+            i.blockSignals(True)
         self.PA_input.setValue(slit.pa)
         self.scale_input.setValue(slit.scale)
         self.dec_input.setValue(slit.refcoord.dec)
         self.ra_input.setValue(slit.refcoord.ra)
+        for i in self.inputs_list:
+            i.blockSignals(False)
 
     @Slot()
     def update_plots(self, coord=None):
@@ -652,6 +656,7 @@ class PlotWidget(QWidget):
 
     @Slot()
     def find_optimal_parameters(self):
+        mode = 'eq'
         params = [self.slit.refcoord.ra.to(u.hourangle).value,
                   self.slit.refcoord.dec.to(u.deg).value,
                   self.slit.pa,
@@ -662,7 +667,7 @@ class PlotWidget(QWidget):
         bounds = [(params[0] - dra, params[0] + dra),
                   (params[1] - ddec, params[1] + ddec),
                   (params[2], params[2]),
-                  (params[3], params[3])]
+                  (params[3] * 0.95, params[3] * 1.05)]
         print('Qval before ', self.qfunc_eq(params, self.spec_plot,
                                             self.interp_params,
                                             self.spec_frame.header))
@@ -681,8 +686,7 @@ class PlotWidget(QWidget):
                               good_params.x[1] * u.deg,
                               good_params.x[2], good_params.x[3])
         self.fill_fileds_from_slit(self.slit)
-        print(self.ra_input.getAngle())
-        self.update_plots()
+        self.update_plots(mode)
 
     @staticmethod
     def try_different_minimizers(func, params, optargs, bounds, verbose=True):

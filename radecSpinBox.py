@@ -86,8 +86,6 @@ class radecSpinBox(QAbstractSpinBox):
         self.update()
         print(self.enabled_steps)
 
-
-
     def getAngle(self):
         return self.angle
 
