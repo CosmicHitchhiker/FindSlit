@@ -315,16 +315,16 @@ class PlotSpec:
         self.figure = figure
         self.axes_obj = figure.subplots()
         if borders is not None:
-            x_range = slice(borders[0], borders[1])
-            y_range = slice(borders[2], borders[3])
+            self.x_range = slice(borders[0], borders[1])
+            self.y_range = slice(borders[2], borders[3])
         else:
-            x_range = slice(None, None)
-            y_range = slice(None, None)
-        self.flux = np.sum(frame.data[y_range, x_range], axis=1)
+            self.x_range = slice(None, None)
+            self.y_range = slice(None, None)
+        self.flux = np.sum(frame.data[self.y_range, self.x_range], axis=1)
         self.norm_flux = norm_vector(self.flux)
         self.spectrum = frame.data
         self.hdr = frame.header
-        self.pos = self.coords_from_header(axes=2)[y_range]
+        self.pos = self.coords_from_header(axes=2)[self.y_range]
         self.spec_flux_line = None
         self.plot_spectrum_flux()
 
@@ -342,7 +342,7 @@ class PlotSpec:
             return
 
         self.hdr['CDELT2'] = scale
-        self.pos = self.coords_from_header(axes=2)
+        self.pos = self.coords_from_header(axes=2)[self.y_range]
         if self.spec_flux_line is not None:
             self.spec_flux_line.set_xdata(self.pos)
             self.axes_obj.relim()
@@ -390,10 +390,12 @@ class PlotWidget(QWidget):
         self.PA_input = QDoubleSpinBox()
         self.PA_input.setMaximum(360.0)
         self.PA_input.setMinimum(-360.0)
+        self.PA_input.setDecimals(1)
 
         self.scale_input = QDoubleSpinBox()
         # noinspection PyUnresolvedReferences
         self.scale_input.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
+        self.scale_input.setDecimals(4)
 
         self.ra_input = radecSpinBox(radec='ra')
         self.dec_input = radecSpinBox(radec='dec')
@@ -540,7 +542,6 @@ class PlotWidget(QWidget):
                                                     init_pos=self.spec_plot.pos)
             self.spec_plot.plot_image_flux(pos, flux)
 
-
     @Slot()
     def redraw(self):
         """Redraw all plots. This function runs only when redraw button is clicked."""
@@ -639,19 +640,15 @@ class PlotWidget(QWidget):
 
         try:
             self.image_plot.plot_slit(self.slit)
-            # pos, flux = self.interp_params.get_flux(self.slit)
-            # self.spec_plot.plot_image_flux(pos, flux)
         except AttributeError:
             print('No object presented')
 
-        pos, flux = self.interp_params.get_flux(self.slit,
-                                                init_pos=self.spec_plot.pos)
-        self.spec_plot.plot_image_flux(pos, flux)
-        # try:
-        #     pos, flux = self.interp_params.get_flux(self.slit)
-        #     # self.spec_plot.plot_image_flux(pos, flux)
-        # except AttributeError:
-        #     print("Can't plot flux")
+        try:
+            pos, flux = self.interp_params.get_flux(self.slit,
+                                                    init_pos=self.spec_plot.pos)
+            self.spec_plot.plot_image_flux(pos, flux)
+        except AttributeError:
+            print("Can't plot flux")
 
     @Slot()
     def find_optimal_parameters(self):
@@ -659,14 +656,16 @@ class PlotWidget(QWidget):
                   self.slit.refcoord.dec.to(u.deg).value,
                   self.slit.pa,
                   self.slit.scale]
+        print('Params before minimization: ', params)
         dra = (60 * u.arcsec).to(u.hourangle).value
         ddec = (60 * u.arcsec).to(u.deg).value
         bounds = [(params[0] - dra, params[0] + dra),
                   (params[1] - ddec, params[1] + ddec),
                   (params[2], params[2]),
-                  (params[3] * 0.9, params[3] * 1.1)]
-        print(self.qfunc_eq(params, self.spec_plot, self.interp_params,
-                            self.spec_frame.header))
+                  (params[3], params[3])]
+        print('Qval before ', self.qfunc_eq(params, self.spec_plot,
+                                            self.interp_params,
+                                            self.spec_frame.header))
         optargs = (self.spec_plot, self.interp_params,
                    self.spec_frame.header)
         # good_params = optimize.minimize(self.qfunc_eq, params,
@@ -674,17 +673,19 @@ class PlotWidget(QWidget):
         #                                 method='Nelder-Mead')
         good_params = self.try_different_minimizers(self.qfunc_eq, params,
                                                     optargs, bounds)
-        print(good_params)
+        # print(good_params)
+        print(good_params.x)
         print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
                             self.spec_frame.header))
         self.slit.from_fields(good_params.x[0] * u.hourangle,
                               good_params.x[1] * u.deg,
                               good_params.x[2], good_params.x[3])
         self.fill_fileds_from_slit(self.slit)
+        print(self.ra_input.getAngle())
         self.update_plots()
 
     @staticmethod
-    def try_different_minimizers(func, params, optargs, bounds):
+    def try_different_minimizers(func, params, optargs, bounds, verbose=True):
         methods = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP']
         res = None
         q = func(params, *optargs)
@@ -693,13 +694,13 @@ class PlotWidget(QWidget):
         while not good_result:
             q_old = q
             for m in methods:
-                print(m)
+                if verbose: print(m)
                 res = optimize.minimize(func, params,
                                         args=optargs, bounds=bounds,
                                         method=m)
                 if res.fun < q:
                     q = res.fun
-                    print('BEST!!!', m)
+                    if verbose: print('BEST!!!', m)
                     best_params = res.x
             params = best_params
             good_result = (q == q_old)
