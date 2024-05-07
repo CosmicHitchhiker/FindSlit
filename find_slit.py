@@ -684,19 +684,16 @@ class PlotWidget(QWidget):
                   (params[2], params[2]),
                   (params[3] * 0.95, params[3] * 1.05)]
         print('Qval before ', self.qfunc_eq(params, self.spec_plot,
-                                            self.interp_params,
-                                            self.spec_frame.header))
-        optargs = (self.spec_plot, self.interp_params,
-                   self.spec_frame.header)
+                                            self.interp_params))
+        optargs = (self.spec_plot, self.interp_params)
         # good_params = optimize.minimize(self.qfunc_eq, params,
         #                                 args=optargs, bounds=bounds,
         #                                 method='Nelder-Mead')
         good_params = self.try_different_minimizers(self.qfunc_eq, params,
                                                     optargs, bounds)
-        # print(good_params)
-        print(good_params.x)
-        print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
-                            self.spec_frame.header))
+        print(good_params)
+        # print(good_params.x)
+        print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params))
         self.slit.from_fields(good_params.x[0] * u.hourangle,
                               good_params.x[1] * u.deg,
                               good_params.x[2], good_params.x[3])
@@ -730,7 +727,7 @@ class PlotWidget(QWidget):
         self.border_w.show()
 
     @staticmethod
-    def qfunc_eq(params, plotspec, interpparams, hdr):
+    def qfunc_eq(params, plotspec, interpparams):
         """
 
         Parameters
@@ -760,7 +757,7 @@ class PlotWidget(QWidget):
         ra, dec, pa, scale = params
 
         loc_slit = SlitParams()
-        loc_slit.from_header(hdr)
+        loc_slit.from_header(plotspec.hdr)
         loc_slit.from_fields(ra, dec, pa, scale)
         lims = plotspec.y_range
         lims = [None, None, lims.start, lims.stop]
