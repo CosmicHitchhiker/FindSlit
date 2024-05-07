@@ -59,6 +59,7 @@ class SlitParams:
         self.crpix = 0
         self.crpix_init = 0
         self.npix = 0
+        self.npix_init = 0
         self.pa = 0
         self.scale = 1
         self.width = 1
@@ -105,6 +106,7 @@ class SlitParams:
 
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
         self.crpix_init = self.crpix
+        self.npix_init = self.npix
 
     def from_fields(self, ra, dec, pa, scale):
         self.pa = pa
@@ -115,8 +117,17 @@ class SlitParams:
 
     def add_limits(self, lims):
         miny, maxy = lims[2], lims[3]
-        self.crpix = self.crpix_init - miny
-        self.npix = maxy - miny + 1
+        if miny is not None:
+            self.crpix = self.crpix_init - miny
+        else:
+            self.crpix = self.crpix_init
+
+        if maxy is not None:
+            self.npix = maxy - miny + 1
+        elif miny is not None:
+            self.npix = self.npix_init - miny + 1
+        else:
+            self.npix = self.npix_init
 
     @staticmethod
     def parse_tds_slit(slitname):
@@ -368,9 +379,13 @@ class PlotWidget(QWidget):
         super().__init__(parent)
         self.myStatus = QStatusBar()
 
+        # fits.PrimaryHDU: photometry
         self.image_frame = None
+        # fits.PrimaryHdu: spectrum
         self.spec_frame = None
+        # PlotImage
         self.image_plot = None
+        # PlotSpec
         self.spec_plot = None
         self.interp_params = InterpParams()
         self.slit = SlitParams()
@@ -716,11 +731,40 @@ class PlotWidget(QWidget):
 
     @staticmethod
     def qfunc_eq(params, plotspec, interpparams, hdr):
+        """
+
+        Parameters
+        ----------
+        params : list of float
+            list of parameters to be minimized
+            ra - right accession (hourangle)
+            dec - declination (degrees)
+            pa - position algle (degrees)
+            scale - size of pixel ("/pix)
+        plotspec : PlotSpec
+            object of PlotSpec class, it has flux (summ of a spectrum across
+            wavelengths) and position of that flux
+        interpparams : InterpParams
+            object of InterpParams flux,
+            it has photometry roteted to the slit PA
+        hdr : astropy.io.fits.Header
+            header of the spectrum
+
+        Returns
+        -------
+        q : float
+            this parameter shows how close is the estimation of slit position
+            (how good the photometry fits the spectrum flux with given params)
+
+        """
         ra, dec, pa, scale = params
 
         loc_slit = SlitParams()
         loc_slit.from_header(hdr)
         loc_slit.from_fields(ra, dec, pa, scale)
+        lims = plotspec.y_range
+        lims = [None, None, lims.start, lims.stop]
+        loc_slit.add_limits(lims)
         pos, flux = interpparams.get_flux(loc_slit,
                                           init_pos=plotspec.pos)
         flux = norm_vector(flux)
