@@ -89,6 +89,9 @@ class radecSpinBox(QAbstractSpinBox):
     def getAngle(self):
         return self.angle
 
+    def getText(self):
+        return self.line.text()
+
     def setValue(self, value):
         self.angle = Angle(value, unit=self.unit)
         self.line.setText(self.textFromValue(self.angle.value))

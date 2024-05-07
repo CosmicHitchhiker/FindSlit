@@ -76,8 +76,6 @@ class OpenFile(QWidget):
                 self.fits_box.setText(new_text)
                 self.changed_path.emit(self.dir)
 
-
-
     def fill_string(self, string):
         self.fits_box.setText(string)
         self.check_line()

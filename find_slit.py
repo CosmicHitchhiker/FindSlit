@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QPushButton,
     QStatusBar,
-    # QFileDialog,
+    QFileDialog,
     # QCheckBox,
 )
 
@@ -503,6 +503,7 @@ class PlotWidget(QWidget):
         self.PA_input.valueChanged.connect(lambda: self.update_plots('pa'))
         self.scale_input.valueChanged.connect(lambda: self.update_plots('scale'))
         self.border_w.accepted.connect(self.spec_borders_changed)
+        self.saveres_button.clicked.connect(self.save_results)
 
     @Slot()
     def plot_rot_image(self):
@@ -702,6 +703,28 @@ class PlotWidget(QWidget):
 
     @staticmethod
     def try_different_minimizers(func, params, optargs, bounds, verbose=True):
+        """This function use different  methods of scipy.optimize.minimize
+        untill they all will consider result as minimum.
+
+        Parameters
+        ----------
+        func : function to minimize
+            will be passed to minimizers
+        params : list of float
+            initial guess of variable parameters
+        optargs : tuple
+            additional parameters passed to func
+        bounds : list of tuples
+            every tuple is the lower and the upper bounds for every parameter
+        verbose : bool, optional, default: True
+            set to False if you don't want to print information about
+            minimization process
+
+        Returns
+        -------
+        res : result of optimize.minimize
+
+        """
         methods = ['Nelder-Mead', 'Powell', 'L-BFGS-B', 'TNC', 'SLSQP']
         res = None
         q = func(params, *optargs)
@@ -719,6 +742,8 @@ class PlotWidget(QWidget):
                     if verbose: print('BEST!!!', m)
                     best_params = res.x
             params = best_params
+            # if result hasn't changed after checking every minimizer,
+            # then consider it's good
             good_result = (q == q_old)
         return res
 
@@ -744,8 +769,6 @@ class PlotWidget(QWidget):
         interpparams : InterpParams
             object of InterpParams flux,
             it has photometry roteted to the slit PA
-        hdr : astropy.io.fits.Header
-            header of the spectrum
 
         Returns
         -------
@@ -768,6 +791,24 @@ class PlotWidget(QWidget):
         spec_flux = norm_vector(plotspec.flux)
         q = correlation(flux, spec_flux)
         return q
+
+    @Slot()
+    def save_results(self):
+        files_path = QFileDialog.getSaveFileName(self, "Save result",
+                                                 self.spec_field.dir,
+                                                 "All (*)")[0]
+        hdul = fits.open(self.spec_field.files)
+        spec_header_new = hdul[0].header
+        hdul[0].header['CDELT2'] = self.scale_input.value()
+        hdul[0].header['RA'] = self.ra_input.getText()
+        hdul[0].header['DEC'] = self.dec_input.getText()
+        if 'EPOCH' in spec_header_new:
+            hdul[0].header['EPOCH'] = 2000.0
+        hdul[0].header['POSANG'] = self.PA_input.value()
+        hdul.writeto(files_path)
+
+        print(files_path)
+        pass
 
 
 if __name__ == "__main__":
