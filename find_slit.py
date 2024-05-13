@@ -13,7 +13,7 @@ from astropy.visualization import simple_norm
 from astropy.io import fits
 from astropy.wcs import WCS
 import astropy.units as u
-from astropy.coordinates import SkyCoord, FK5
+from astropy.coordinates import SkyCoord, FK5, Angle
 import reproject
 import time
 from scipy import optimize
@@ -28,13 +28,15 @@ from PySide6.QtWidgets import (
     QApplication,
     QWidget,
     QDoubleSpinBox,
+    QSpinBox,
     QHBoxLayout,
     QFormLayout,
     QGridLayout,
     QPushButton,
     QStatusBar,
     QFileDialog,
-    # QCheckBox,
+    QCheckBox,
+    QLabel,
 )
 
 from OpenFile import OpenFile
@@ -371,6 +373,53 @@ class PlotSpec:
         self.figure.canvas.draw()
 
 
+class ParameterField(QWidget):
+
+    def __init__(self, spinbox='double', label='',
+                 minval: (int, float, Angle, u.Quantity) = 0,
+                 maxval: (int, float, Angle, u.Quantity) = 100,
+                 dec=2):
+        super().__init__()
+        self.type = spinbox
+        if spinbox == 'double':
+            self.spinbox = QDoubleSpinBox()
+            self.spinbox.setDecimals(dec)
+        elif spinbox == 'int':
+            self.spinbox = QSpinBox()
+        elif spinbox == 'ra' or spinbox == 'dec':
+            self.spinbox = radecSpinBox(radec=spinbox)
+        else:
+            raise ValueError("spinbox argument of the ParameterField class "
+                             + "should be 'int', 'double', 'ra' or 'dec'")
+
+        self.spinbox.setRange(minval, maxval)
+        self.spinbox.setKeyboardTracking(False)
+
+        self.label = QLabel(label)
+        self.checkbox = QCheckBox('fix')
+        self.checkbox.setToolTip("don't change while finding optimal parameters")
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.label, 1)
+        layout.addWidget(self.spinbox, 6)
+        layout.addWidget(self.checkbox, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
+    @Slot()
+    def setValue(self, val):
+        self.spinbox.setValue(val)
+
+    def value(self):
+        return self.spinbox.value()
+
+    def getAngle(self):
+        if self.type in ['double', 'int']:
+            raise AttributeError
+        elif self.type in ['ra', 'dec']:
+            return self.spinbox.getAngle()
+
+
 class PlotWidget(QWidget):
     """main window"""
 
@@ -402,77 +451,41 @@ class PlotWidget(QWidget):
         self.image_field = OpenFile(text='image', mode='o')
         self.spec_field = OpenFile(text='spectrum', mode='o')
 
-        self.PA_input = QDoubleSpinBox()
-        self.PA_input.setMaximum(360.0)
-        self.PA_input.setMinimum(-360.0)
-        self.PA_input.setDecimals(1)
+        self.PA_input = ParameterField('double', label='PA, deg',
+                                       minval=-360, maxval=360, dec=1)
 
-        self.scale_input = QDoubleSpinBox()
+        self.scale_input = ParameterField('double', label='Scale "/pix',
+                                          dec=4)
         # noinspection PyUnresolvedReferences
-        self.scale_input.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
-        self.scale_input.setDecimals(4)
+        self.scale_input.spinbox.setStepType(QDoubleSpinBox.AdaptiveDecimalStepType)
 
-        self.ra_input = radecSpinBox(radec='ra')
-        self.dec_input = radecSpinBox(radec='dec')
+        self.ra_input = ParameterField('ra', label='RA, hourangle',
+                                       minval=0, maxval=24)
+        self.dec_input = ParameterField('dec', label='DEC, degrees',
+                                        minval=-90, maxval=90)
 
-        self.x_input = QDoubleSpinBox()
-        self.y_input = QDoubleSpinBox()
-        self.along_input = QDoubleSpinBox()
-        self.perp_input = QDoubleSpinBox()
+        self.x_input = ParameterField('double', label='x, px',
+                                      minval=-1e+6, maxval=1e+6)
+        self.y_input = ParameterField('double', label='y, px',
+                                      minval=-1e+6, maxval=1e+6)
+        self.along_input = ParameterField('double',
+                                          label='shift along slit, "',
+                                          minval=-1e+6, maxval=1e+6)
+        self.perp_input = ParameterField('double',
+                                         label='shift normal to slit, "',
+                                         minval=-1e+6, maxval=1e+6)
 
-        self.inputs_list = [self.PA_input, self.scale_input,
-                            self.ra_input, self.dec_input,
-                            self.x_input, self.y_input,
-                            self.along_input, self.perp_input]
-
-        for i in self.inputs_list:
-            i.setKeyboardTracking(False)
-
-        for i in self.inputs_list[4:]:
-            i.setMinimum(-1e+6)
-            i.setMaximum(1e+6)
+        self.inputs_list = [self.PA_input.spinbox, self.scale_input.spinbox,
+                            self.ra_input.spinbox, self.dec_input.spinbox,
+                            self.x_input.spinbox, self.y_input.spinbox,
+                            self.along_input.spinbox, self.perp_input.spinbox]
 
         self.redraw_button = QPushButton(text='Reopen files')
         self.saveres_button = QPushButton(text='Save Results')
         self.calculate_button = QPushButton(text='Find optimal parameters')
         self.border_button = QPushButton(text='Set borders')
 
-        # Layout
-        r_button_layout = QHBoxLayout()
-        r_button_layout.addWidget(self.redraw_button)
-        r_button_layout.addWidget(self.saveres_button)
-
-        l_button_layout = QHBoxLayout()
-        l_button_layout.addWidget(self.calculate_button)
-        l_button_layout.addWidget(self.border_button)
-
-        left_layout = QFormLayout()
-        left_layout.addRow(self.spec_field)
-        left_layout.addRow('RA', self.ra_input)
-        left_layout.addRow('x, px', self.x_input)
-        left_layout.addRow('shift normal to slit, "', self.perp_input)
-        left_layout.addRow('PA', self.PA_input)
-        left_layout.addRow(l_button_layout)
-        right_layout = QFormLayout()
-        right_layout.addRow(self.image_field)
-        right_layout.addRow('DEC', self.dec_input)
-        right_layout.addRow('y, px', self.y_input)
-        right_layout.addRow('shift along slit, "', self.along_input)
-        right_layout.addRow('Scale "/pix', self.scale_input)
-        right_layout.addRow(r_button_layout)
-
-        glayout = QGridLayout()
-        glayout.addWidget(self.toolbar_spec, 0, 0)
-        glayout.addWidget(self.toolbar_image, 0, 1)
-        glayout.addWidget(self.spec_fig, 1, 0)
-        glayout.addWidget(self.image_fig, 1, 1)
-        glayout.addLayout(left_layout, 2, 0)
-        glayout.addLayout(right_layout, 2, 1)
-        # glayout.addItem(self.myStatus, 3, 0, columnSpan=2)
-        glayout.setRowStretch(0, 0)
-        glayout.setRowStretch(1, 1)
-        glayout.setRowStretch(2, 0)
-        self.setLayout(glayout)
+        self.__setLayout()
 
         self.PA_input.setValue(pa)
         self.scale_input.setValue(scale)
@@ -494,16 +507,54 @@ class PlotWidget(QWidget):
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.find_optimal_parameters)
         self.border_button.clicked.connect(self.set_borders)
-        self.ra_input.valueChanged.connect(lambda: self.update_plots('eq'))
-        self.dec_input.valueChanged.connect(lambda: self.update_plots('eq'))
-        self.x_input.valueChanged.connect(lambda: self.update_plots('im'))
-        self.y_input.valueChanged.connect(lambda: self.update_plots('im'))
-        self.along_input.valueChanged.connect(lambda: self.update_plots('slit'))
-        self.perp_input.valueChanged.connect(lambda: self.update_plots('slit'))
-        self.PA_input.valueChanged.connect(lambda: self.update_plots('pa'))
-        self.scale_input.valueChanged.connect(lambda: self.update_plots('scale'))
+        self.ra_input.spinbox.valueChanged.connect(lambda: self.update_plots('eq'))
+        self.dec_input.spinbox.valueChanged.connect(lambda: self.update_plots('eq'))
+        self.x_input.spinbox.valueChanged.connect(lambda: self.update_plots('im'))
+        self.y_input.spinbox.valueChanged.connect(lambda: self.update_plots('im'))
+        self.along_input.spinbox.valueChanged.connect(lambda: self.update_plots('slit'))
+        self.perp_input.spinbox.valueChanged.connect(lambda: self.update_plots('slit'))
+        self.PA_input.spinbox.valueChanged.connect(lambda: self.update_plots('pa'))
+        self.scale_input.spinbox.valueChanged.connect(lambda: self.update_plots('scale'))
         self.border_w.accepted.connect(self.spec_borders_changed)
         self.saveres_button.clicked.connect(self.save_results)
+
+    def __setLayout(self):
+        # Layout
+        r_button_layout = QHBoxLayout()
+        r_button_layout.addWidget(self.redraw_button)
+        r_button_layout.addWidget(self.saveres_button)
+
+        l_button_layout = QHBoxLayout()
+        l_button_layout.addWidget(self.calculate_button)
+        l_button_layout.addWidget(self.border_button)
+
+        left_layout = QFormLayout()
+        left_layout.addRow(self.spec_field)
+        left_layout.addRow(self.ra_input)
+        left_layout.addRow(self.x_input)
+        left_layout.addRow(self.perp_input)
+        left_layout.addRow(self.PA_input)
+        left_layout.addRow(l_button_layout)
+        right_layout = QFormLayout()
+        right_layout.addRow(self.image_field)
+        right_layout.addRow(self.dec_input)
+        right_layout.addRow(self.y_input)
+        right_layout.addRow(self.along_input)
+        right_layout.addRow(self.scale_input)
+        right_layout.addRow(r_button_layout)
+
+        glayout = QGridLayout()
+        glayout.addWidget(self.toolbar_spec, 0, 0)
+        glayout.addWidget(self.toolbar_image, 0, 1)
+        glayout.addWidget(self.spec_fig, 1, 0)
+        glayout.addWidget(self.image_fig, 1, 1)
+        glayout.addLayout(left_layout, 2, 0)
+        glayout.addLayout(right_layout, 2, 1)
+        # glayout.addItem(self.myStatus, 3, 0, columnSpan=2)
+        glayout.setRowStretch(0, 0)
+        glayout.setRowStretch(1, 1)
+        glayout.setRowStretch(2, 0)
+        self.setLayout(glayout)
 
     @Slot()
     def plot_rot_image(self):
