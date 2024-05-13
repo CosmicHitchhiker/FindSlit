@@ -84,7 +84,6 @@ class radecSpinBox(QAbstractSpinBox):
             self.enabled_steps ^= QAbstractSpinBox.StepDownEnabled
         self.stepEnabled()
         self.update()
-        print(self.enabled_steps)
 
     def getAngle(self):
         return self.angle
@@ -92,10 +91,52 @@ class radecSpinBox(QAbstractSpinBox):
     def getText(self):
         return self.line.text()
 
+    def value(self, unit=None):
+        """Return angle as float. If no unit is specified, it will be in deg
+        for 'dec' spinbox and in hourangle for 'ra' spinbox
+
+        Parameters
+        ----------
+        unit : astropy.units.Unit
+            one of the angle units, if specified, the value will be in this unit
+
+        Returns
+        -------
+        val : float
+            the spinbox value in deg (for 'dec'), hourangle (for 'ra') or
+            other specified unit
+
+        """
+        if unit:
+            return self.angle.to(unit).value
+        else:
+            return self.angle.to(self.unit).value
+
+    def getUnit(self):
+        return self.unit
+
     def setValue(self, value):
         self.angle = Angle(value, unit=self.unit)
+        self.checkBoundaries()
         self.line.setText(self.textFromValue(self.angle.value))
         self.valueChanged.emit(self.angle)
+
+    def setRange(self, minval=None, maxval=None):
+        if minval is None:
+            pass
+        elif isinstance(minval, (Angle, u.Quantity, int, float)):
+            self.minimum = Angle(minval, unit=self.unit)
+        else:
+            raise TypeError('minval should be Angle, Quantity, int, double or None!')
+        
+        if maxval is None:
+            pass
+        elif isinstance(maxval, (Angle, u.Quantity, int, float)):
+            self.maximum = Angle(maxval, unit=self.unit)
+        else:
+            raise TypeError('maxval should be Angle, Quantity, int, double or None!')
+
+        self.checkBoundaries()
 
     def validate(self, text, pos):
         # print('validating')
