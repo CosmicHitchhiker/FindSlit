@@ -52,7 +52,11 @@ def norm_vector(vec):
 
 
 def correlation(vec1, vec2):
-    return np.arccos(np.sum(vec1 * vec2))
+    if not np.shape(vec1) == np.shape(vec2):
+        raise IndexError('vectors shoud have same dimensions to find their correlation')
+    a = norm_vector(vec1)
+    b = norm_vector(vec2)
+    return np.arccos(np.sum(a * b))
 
 
 class SlitParams:
@@ -66,6 +70,8 @@ class SlitParams:
         self.scale = 1
         self.width = 1
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
+        self.pixpos = np.array([- self.crpix, self.npix - self.crpix])
+        self.pos = self.pixpos * self.scale
 
     def from_header(self, hdr):
         if 'EPOCH' in hdr:
@@ -109,9 +115,12 @@ class SlitParams:
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
         self.crpix_init = self.crpix
         self.npix_init = self.npix
+        self.pixpos = np.array([- self.crpix, self.npix - self.crpix])
+        self.pos = self.pixpos * self.scale
 
     def from_fields(self, ra, dec, pa, scale):
         self.pa = pa
+        self.pos = self.pixpos * scale
         self.scale = scale
         self.refcoord = SkyCoord(ra, dec,
                                  unit=(u.hourangle, u.deg))
@@ -130,6 +139,16 @@ class SlitParams:
             self.npix = self.npix_init - miny + 1
         else:
             self.npix = self.npix_init
+
+        self.pos = np.array([- self.crpix, self.npix - self.crpix]) * self.scale
+
+    def set_pixpos(self, pixpos):
+        self.pixpos = pixpos
+        self.pos = self.pixpos * self.scale
+
+    def set_pos(self, pos):
+        self.pos = pos
+        self.pixpos = self.pos / self.scale
 
     @staticmethod
     def parse_tds_slit(slitname):
@@ -242,11 +261,11 @@ class InterpParams:
         plt.imshow(self.image_rotated)
 
         if slitpos is not None:
-            high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
-            low = slitpos.crpix * slitpos.scale * u.arcsec
+            high = slitpos.pos.max() * u.arcsec
+            low = slitpos.pos.min() * u.arcsec
             top = SkyCoord(0 * u.deg, high,
                            frame=slitpos.frame)
-            bottom = SkyCoord(0 * u.deg, -low,
+            bottom = SkyCoord(0 * u.deg, low,
                               frame=slitpos.frame)
             x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
             plt.plot(x, y, 'ro')
@@ -260,8 +279,8 @@ class InterpParams:
             if np.abs(slitpos.pa - self.slit.pa) > 0.01:
                 print('yes')
                 self.rotate_image(slitpos)
-            high = (slitpos.npix - slitpos.crpix) * slitpos.scale * u.arcsec
-            low = slitpos.crpix * slitpos.scale * u.arcsec
+            high = slitpos.pos.max() * u.arcsec
+            low = slitpos.pos.min() * u.arcsec
             halfw = slitpos.width * u.arcsec / 2.
             x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
         else:
@@ -272,9 +291,9 @@ class InterpParams:
         cd_y = s_wcs.cdelt[1] * s_wcs.cunit[1]
         low_pix = (low.to(u.deg) / cd_y.to(u.deg)).value
         high_pix = (high.to(u.deg) / cd_y.to(u.deg)).value
-        y_min = int(y - low_pix)
+        y_min = int(y + low_pix)
         y_max = int(y + high_pix + 1)
-        pos = np.arange(y_max - y_min) - low_pix
+        pos = np.arange(y_max - y_min) + low_pix
         pos = pos * cd_y.to(u.arcsec).value
 
         cd_x = s_wcs.cdelt[0] * s_wcs.cunit[0]
@@ -286,6 +305,9 @@ class InterpParams:
         if init_pos is not None:
             flux = np.interp(init_pos, pos, flux)
             pos = init_pos
+        else:
+            flux = np.interp(slitpos.pos, pos, flux)
+            pos = slitpos.pos[:]
 
         return pos, flux
 
@@ -313,8 +335,8 @@ class PlotImage:
             list(self.axes_obj.patches)[0].remove()
             # self.figure.canvas.draw()
 
-        h_up = (slit.npix - slit.crpix) * slit.scale * u.arcsec
-        h_down = slit.crpix * slit.scale * u.arcsec
+        h_up = slit.pos.max() * u.arcsec
+        h_down = -slit.pos.min() * u.arcsec
         s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
                         theta=0 * u.deg,
                         edgecolor='tab:olive', facecolor='none', lw=0.5,
@@ -653,14 +675,14 @@ class PlotWidget(QWidget):
         self.slit.from_fields(self.ra_input.getAngle(), self.dec_input.getAngle(),
                               self.PA_input.value(), self.scale_input.value())
 
-        if coord == 'scale':
+        if coord == 'scale' and self.spec_plot is not None:
             self.spec_plot.update_scale(self.scale_input.value())
 
         for i in self.inputs_list:
             i.blockSignals(False)
 
     def im_from_eq(self):
-        if self.image_frame is not None:
+        if self.image_plot is not None:
             eq = SkyCoord(self.ra_input.getAngle(), self.dec_input.getAngle(),
                           unit=(u.hourangle, u.deg))
             im = self.image_plot.wcs.world_to_pixel(eq)
@@ -675,7 +697,15 @@ class PlotWidget(QWidget):
             self.perp_input.setValue(slit.lon.to(u.arcsec).value)
             self.along_input.setValue(slit.lat.to(u.arcsec).value)
 
-    def eq_from_slit(self):
+    def eq_from_slit(self, coord=None):
+        if coord is not None:
+            if self.slit is None:
+                raise AttributeError('Slit is not set!')
+            slit = SkyCoord(coord[0] * u.arcsec,
+                            coord[1] * u.arcsec,
+                            frame=self.init_slit_frame)
+            eq = slit.transform_to(FK5)
+            return eq.ra.to(u.hourangle).value, eq.dec.to(u.deg).value
         if self.slit is not None:
             slit = SkyCoord(self.perp_input.value() * u.arcsec,
                             self.along_input.value() * u.arcsec,
@@ -684,7 +714,12 @@ class PlotWidget(QWidget):
             self.dec_input.setValue(eq.dec)
             self.ra_input.setValue(eq.ra)
 
-    def eq_from_im(self):
+    def eq_from_im(self, coord=None):
+        if coord is not None:
+            if self.image_frame is None:
+                raise AttributeError('Image is not set!')
+            eq = self.image_plot.wcs.pixel_to_world(*coord)
+            return eq.ra.to(u.hourangle).value, eq.dec.to(u.deg).value
         if self.image_frame is not None:
             im = [self.x_input.value(), self.y_input.value()]
             eq = self.image_plot.wcs.pixel_to_world(*im)
@@ -698,6 +733,8 @@ class PlotWidget(QWidget):
         self.scale_input.setValue(slit.scale)
         self.dec_input.setValue(slit.refcoord.dec)
         self.ra_input.setValue(slit.refcoord.ra)
+        self.update_values('eq')
+        # self.update_values('scale')
         for i in self.inputs_list:
             i.blockSignals(False)
 
@@ -717,40 +754,114 @@ class PlotWidget(QWidget):
         try:
             pos, flux = self.interp_params.get_flux(self.slit,
                                                     init_pos=self.spec_plot.pos)
+            interpflux = np.interp(self.spec_plot.pos, pos, flux)
+            print(correlation(interpflux, self.spec_plot.flux))
             self.spec_plot.plot_image_flux(pos, flux)
         except AttributeError:
             print("Can't plot flux")
 
     @Slot()
     def find_optimal_parameters(self):
-        mode = 'eq'
-        params = [self.slit.refcoord.ra.to(u.hourangle).value,
-                  self.slit.refcoord.dec.to(u.deg).value,
+        if (self.x_input.checkbox.isChecked()
+                or self.y_input.checkbox.isChecked()):
+            mode = 'im'
+            coords = [self.x_input.value(), self.y_input.value()]
+            transform_f = self.eq_from_im
+
+            # TODO: ПОМЕНЯТЬ! ЗАВИСИТ ОТ МАСШТАБА КАРТИНКИ!
+            if self.x_input.checkbox.isChecked():
+                dra = 0
+            else:
+                dra = 200
+
+            if self.y_input.checkbox.isChecked():
+                ddec = 0
+            else:
+                ddec = 200
+        elif (self.along_input.checkbox.isChecked()
+              or self.perp_input.checkbox.isChecked()):
+            mode = 'slit'
+            coords = [self.along_input.value(), self.perp_input.value()]
+            transform_f = self.eq_from_slit
+
+            if self.along_input.checkbox.isChecked():
+                dra = 0
+            else:
+                dra = 60
+
+            if self.perp_input.checkbox.isChecked():
+                ddec = 0
+            else:
+                ddec = 60
+        else:
+            mode = 'eq'
+            coords = [self.slit.refcoord.ra.to(u.hourangle).value,
+                      self.slit.refcoord.dec.to(u.deg).value]
+            transform_f = lambda x: (x[0], x[1])
+
+            if self.ra_input.checkbox.isChecked():
+                dra = 0
+            else:
+                dra = (60 * u.arcsec).to(u.hourangle).value
+
+            if self.dec_input.checkbox.isChecked():
+                ddec = 0
+            else:
+                ddec = (60 * u.arcsec).to(u.deg).value
+
+        if self.scale_input.checkbox.isChecked():
+            dscale = 0
+        else:
+            dscale = 0.05 * self.slit.scale
+        params = [*coords,
                   self.slit.pa,
                   self.slit.scale]
+
+        print(mode)
         print('Params before minimization: ', params)
-        dra = (60 * u.arcsec).to(u.hourangle).value
-        ddec = (60 * u.arcsec).to(u.deg).value
         bounds = [(params[0] - dra, params[0] + dra),
                   (params[1] - ddec, params[1] + ddec),
                   (params[2], params[2]),
-                  (params[3] * 0.95, params[3] * 1.05)]
+                  (params[3] - dscale, params[3] + dscale)]
         print('Qval before ', self.qfunc_eq(params, self.spec_plot,
-                                            self.interp_params))
-        optargs = (self.spec_plot, self.interp_params)
-        # good_params = optimize.minimize(self.qfunc_eq, params,
-        #                                 args=optargs, bounds=bounds,
-        #                                 method='Nelder-Mead')
+                                            self.interp_params, transform_f))
+        optargs = (self.spec_plot, self.interp_params, transform_f)
         good_params = self.try_different_minimizers(self.qfunc_eq, params,
                                                     optargs, bounds)
         print(good_params)
         # print(good_params.x)
-        print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params))
-        self.slit.from_fields(good_params.x[0] * u.hourangle,
-                              good_params.x[1] * u.deg,
-                              good_params.x[2], good_params.x[3])
-        self.fill_fileds_from_slit(self.slit)
+        print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
+                            transform_f))
+
+        initcoord = SkyCoord(self.slit.refcoord.ra.to(u.hourangle),
+                             self.slit.refcoord.dec.to(u.deg))
+
+        for i in self.inputs_list:
+            i.blockSignals(True)
+        if mode == 'eq':
+            self.ra_input.setValue(good_params.x[0] * u.hourangle)
+            self.dec_input.setValue(good_params.x[1] * u.deg)
+        elif mode == 'im':
+            self.x_input.setValue(good_params.x[0])
+            self.y_input.setValue(good_params.x[1])
+        elif mode == 'slit':
+            self.along_input_input.setValue(good_params.x[0])
+            self.perp_input_input.setValue(good_params.x[1])
+
+        self.PA_input.setValue(good_params.x[2])
+        self.scale_input.setValue(good_params.x[3])
+        self.update_values('scale')
+        for i in self.inputs_list:
+            i.blockSignals(False)
+        # self.slit.from_fields(good_params.x[0] * u.hourangle,
+        #                       good_params.x[1] * u.deg,
+        #                       good_params.x[2], good_params.x[3])
+        # self.fill_fileds_from_slit(self.slit)
+        # self.update_values('scale')
         self.update_plots(mode)
+        rescoord = SkyCoord(self.slit.refcoord.ra.to(u.hourangle),
+                            self.slit.refcoord.dec.to(u.deg))
+        print('shift is ', initcoord.separation(rescoord))
 
     @staticmethod
     def try_different_minimizers(func, params, optargs, bounds, verbose=True):
@@ -803,7 +914,7 @@ class PlotWidget(QWidget):
         self.border_w.show()
 
     @staticmethod
-    def qfunc_eq(params, plotspec, interpparams):
+    def qfunc_eq(params, plotspec, interpparams, transform_f):
         """
 
         Parameters
@@ -820,6 +931,7 @@ class PlotWidget(QWidget):
         interpparams : InterpParams
             object of InterpParams flux,
             it has photometry roteted to the slit PA
+        transform_f : function
 
         Returns
         -------
@@ -828,19 +940,18 @@ class PlotWidget(QWidget):
             (how good the photometry fits the spectrum flux with given params)
 
         """
-        ra, dec, pa, scale = params
+        x, y, pa, scale = params
+        ra, dec = transform_f([x, y])
 
         loc_slit = SlitParams()
         loc_slit.from_header(plotspec.hdr)
-        loc_slit.from_fields(ra, dec, pa, scale)
         lims = plotspec.y_range
         lims = [None, None, lims.start, lims.stop]
         loc_slit.add_limits(lims)
-        pos, flux = interpparams.get_flux(loc_slit,
-                                          init_pos=plotspec.pos)
-        flux = norm_vector(flux)
-        spec_flux = norm_vector(plotspec.flux)
-        q = correlation(flux, spec_flux)
+        loc_slit.set_pos(plotspec.pos)
+        loc_slit.from_fields(ra, dec, pa, scale)
+        pos, flux = interpparams.get_flux(loc_slit)
+        q = correlation(flux, plotspec.flux)
         return q
 
     @Slot()
