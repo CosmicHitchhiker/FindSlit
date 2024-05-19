@@ -526,6 +526,8 @@ class PlotWidget(QWidget):
         self.calculate_button = QPushButton(text='Find optimal parameters')
         self.border_button = QPushButton(text='Set borders')
 
+        self.interp_shortcut = QShortcut(QKeySequence('Alt+I'), self)
+
         self.__setLayout()
 
         self.PA_input.setValue(pa)
@@ -558,6 +560,7 @@ class PlotWidget(QWidget):
         self.scale_input.spinbox.valueChanged.connect(lambda: self.update_plots('scale'))
         self.border_w.accepted.connect(self.spec_borders_changed)
         self.saveres_button.clicked.connect(self.save_results)
+        self.interp_shortcut.activated.connect(self.plot_rot_image)
 
     def __setLayout(self):
         # Layout
