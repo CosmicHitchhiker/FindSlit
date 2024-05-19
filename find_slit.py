@@ -13,7 +13,7 @@ from astropy.visualization import simple_norm
 from astropy.io import fits
 from astropy.wcs import WCS
 import astropy.units as u
-from astropy.coordinates import SkyCoord, FK5, Angle
+from astropy.coordinates import SkyCoord, FK5, Angle, ICRS
 import reproject
 import time
 from scipy import optimize
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QLabel,
 )
+from PySide6.QtGui import QKeySequence, QShortcut
 
 from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
@@ -62,13 +63,14 @@ def correlation(vec1, vec2):
 class SlitParams:
     def __init__(self):
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
-        self.crpix = 0
-        self.crpix_init = 0
+        self.crpix = 0.
+        self.crpix_init = 0.
         self.npix = 0
         self.npix_init = 0
-        self.pa = 0
-        self.scale = 1
-        self.width = 1
+        self.pa = 0.
+        self.scale = 1.
+        # slit width (arcsec)
+        self.width = 1.
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
         self.pixpos = np.array([- self.crpix, self.npix - self.crpix])
         self.pos = self.pixpos * self.scale
@@ -76,12 +78,15 @@ class SlitParams:
     def from_header(self, hdr):
         if 'EPOCH' in hdr:
             equinox = "J" + str(hdr['EPOCH'])
+            # print(equinox)
             self.refcoord = SkyCoord(hdr['RA'], hdr['DEC'],
                                      unit=(u.hourangle, u.deg),
-                                     frame=FK5(equinox=equinox))
+                                     frame=FK5(equinox=equinox)).transform_to(ICRS)
         else:
             self.refcoord = SkyCoord(hdr['RA'], hdr['DEC'],
                                      unit=(u.hourangle, u.deg))
+
+        # print(self.refcoord)
 
         self.scale = hdr['CDELT2']  # arcsec/pix
         self.npix = hdr['NAXIS2']
@@ -252,6 +257,7 @@ class InterpParams:
         if self.image_hdu is not None:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
+            np.nan_to_num(self.image_rotated, False)
         print('reproject time ', time.perf_counter() - t)
 
     @Slot()
@@ -366,8 +372,15 @@ class PlotSpec:
     def coords_from_header(self, axes=1):
         naxis = self.hdr['NAXIS' + str(axes)]
         cdelt = self.hdr['CDELT' + str(axes)]
-        crpix = self.hdr['CRPIX' + str(axes)]
-        crval = self.hdr['CRVAL' + str(axes)]
+        if ('CRPIX' + str(axes)) in self.hdr:
+            crpix = self.hdr['CRPIX' + str(axes)]
+        else:
+            crpix = naxis / 2
+        if ('CRVAL' + str(axes)) in self.hdr:
+            crval = self.hdr['CRVAL' + str(axes)]
+        else:
+            crval = 0
+        # crval = self.hdr['CRVAL' + str(axes)]
         pix = np.arange(int(naxis)) + 1
         coords = float(cdelt) * (pix - int(crpix)) + float(crval)
         return coords
@@ -440,6 +453,12 @@ class ParameterField(QWidget):
             raise AttributeError
         elif self.type in ['ra', 'dec']:
             return self.spinbox.getAngle()
+
+    def getText(self):
+        if self.type in ['double', 'int']:
+            return str(self.spinbox.value())
+        elif self.type in ['ra', 'dec']:
+            return self.spinbox.getText()
 
 
 class PlotWidget(QWidget):
@@ -704,13 +723,13 @@ class PlotWidget(QWidget):
             slit = SkyCoord(coord[0] * u.arcsec,
                             coord[1] * u.arcsec,
                             frame=self.init_slit_frame)
-            eq = slit.transform_to(FK5)
+            eq = slit.transform_to(ICRS)
             return eq.ra.to(u.hourangle).value, eq.dec.to(u.deg).value
         if self.slit is not None:
             slit = SkyCoord(self.perp_input.value() * u.arcsec,
                             self.along_input.value() * u.arcsec,
                             frame=self.init_slit_frame)
-            eq = slit.transform_to(FK5)
+            eq = slit.transform_to(ICRS)
             self.dec_input.setValue(eq.dec)
             self.ra_input.setValue(eq.ra)
 
