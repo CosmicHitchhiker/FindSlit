@@ -235,7 +235,6 @@ class InterpParams:
             shape = (nx, ny)
         if center is None:
             refpix_shift = slit_center_shift * slit.scale / cdeltarcsec
-            print(refpix_shift)
             center = [shape[0] / 2.0, shape[1] / 2.0 - refpix_shift]
 
         self.slit_wcs = WCS(naxis=2)
@@ -269,7 +268,6 @@ class InterpParams:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
             np.nan_to_num(self.image_rotated, False)
-            print(self.image_rotated)
         print('reproject time ', time.perf_counter() - t)
 
     @Slot()
@@ -327,7 +325,6 @@ class InterpParams:
             shift = self.slit.refcoord.separation(slitpos.refcoord)
             if (np.abs(slitpos.pa - self.slit.pa) > 0.01
                     or shift.to(u.arcsec).value > 92) and allow_reproject:
-                print('yes')
                 self.rotate_image(slitpos)
 
             high = slitpos.pos.max() * u.arcsec
@@ -737,7 +734,7 @@ class PlotWidget(QWidget):
         for i in self.inputs_list:
             i.blockSignals(True)
 
-        if coord == 'eq':
+        if coord == 'eq' or coord == 'pa':
             self.im_from_eq()
             self.slit_from_eq()
         elif coord == 'im':
@@ -815,6 +812,10 @@ class PlotWidget(QWidget):
 
     @Slot()
     def update_plots(self, coord=None):
+        if coord == "pa":
+            orig = SkyCoord(self.init_slit_frame.origin)
+            rot = self.PA_input.value() * u.deg
+            self.init_slit_frame = orig.skyoffset_frame(rotation=rot)
         # Сравниваем значение в поле со значением в интерп (не в слит!)
         need_reproject = (np.abs(self.PA_input.value() - self.interp_params.slit.pa) > 0.01)
         self.update_values(coord)
@@ -830,7 +831,7 @@ class PlotWidget(QWidget):
             pos, flux = self.interp_params.get_flux(self.slit,
                                                     init_pos=self.spec_plot.pos)
             interpflux = np.interp(self.spec_plot.pos, pos, flux)
-            print(correlation(interpflux, self.spec_plot.flux))
+            print('Qfunc: ', correlation(interpflux, self.spec_plot.flux))
             self.spec_plot.plot_image_flux(pos, flux)
         except AttributeError:
             print("Can't plot flux")
