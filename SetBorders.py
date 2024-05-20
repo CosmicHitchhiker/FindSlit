@@ -19,11 +19,13 @@ from astropy.visualization import simple_norm
 class WavelengthTransform:
     def __init__(self, header):
         self.header = header
-        self.dl = header['CDELT1']
-        self.x0 = header['CRPIX1']
-        self.l0 = header['CRVAL1']
+        self.dl = float(header['CDELT1'])
+        self.x0 = float(header['CRPIX1'])
+        self.l0 = float(header['CRVAL1'])
         self.x_to_wl = lambda x: (x - self.x0) * self.dl + self.l0
         self.wl_to_x = lambda wl: (wl - self.l0) / self.dl + self.x0
+
+        # print(self.dl, self.x0, self.l0)
 
         self.lmin = self.x_to_wl(1)
         self.lmax = self.x_to_wl(header['NAXIS1'])
@@ -100,9 +102,11 @@ class PairLabledSpinBox(QWidget):
         self.minbox.set_range(minv, maxv)
         self.maxbox.set_range(minv, maxv)
 
-    def set_values(self, minv, maxv):
-        self.minbox.set_value(minv)
-        self.maxbox.set_value(maxv)
+    def set_values(self, minv=None, maxv=None):
+        if minv is not None:
+            self.minbox.set_value(minv)
+        if maxv is not None:
+            self.maxbox.set_value(maxv)
 
     def get_min(self):
         return self.minbox.value()
@@ -181,10 +185,12 @@ class SetBorders(QDialog):
         layout.setStretch(1, 1)
         self.setLayout(layout)
 
-        self.x_box.minChanged.connect(self.minx_line.change_pos)
-        self.x_box.maxChanged.connect(self.maxx_line.change_pos)
+        self.x_box.minChanged.connect(self.minx_changed)
+        self.x_box.maxChanged.connect(self.maxx_changed)
         self.y_box.minChanged.connect(self.miny_line.change_pos)
         self.y_box.maxChanged.connect(self.maxy_line.change_pos)
+        self.l_box.minChanged.connect(self.minl_changed)
+        self.l_box.maxChanged.connect(self.maxl_changed)
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self.apply_borders)
 
@@ -226,3 +232,31 @@ class SetBorders(QDialog):
                         self.y_box.get_max()]
 
         super().accept()
+
+    @Slot()
+    def minl_changed(self, val):
+        minx = self.wl_transform.wl_to_x(val)
+        self.x_box.minbox.set_value(round(minx))
+
+    @Slot()
+    def maxl_changed(self, val):
+        maxx = self.wl_transform.wl_to_x(val)
+        self.x_box.maxbox.set_value(round(maxx))
+
+    @Slot()
+    def minx_changed(self, val):
+        self.minx_line.change_pos(val)
+        self.l_box.blockSignals(True)
+        minl = self.wl_transform.x_to_wl(val)
+        self.l_box.minbox.set_value(minl)
+        self.l_box.blockSignals(False)
+
+    @Slot()
+    def maxx_changed(self, val):
+        self.maxx_line.change_pos(val)
+        self.l_box.blockSignals(True)
+        maxl = self.wl_transform.x_to_wl(val)
+        self.l_box.maxbox.set_value(maxl)
+        self.l_box.blockSignals(False)
+
+
