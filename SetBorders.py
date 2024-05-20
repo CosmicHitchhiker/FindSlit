@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QLabel,
+    QButtonGroup,
 )
 from matplotlib.figure import Figure
 # noinspection PyUnresolvedReferences
@@ -103,6 +104,8 @@ class PairLabledSpinBox(QWidget):
         self.maxbox.set_range(minv, maxv)
 
     def set_values(self, minv=None, maxv=None):
+        if isinstance(minv, list):
+            minv, maxv = minv[0], minv[1]
         if minv is not None:
             self.minbox.set_value(minv)
         if maxv is not None:
@@ -139,8 +142,21 @@ class BorderLine:
         self.fig.canvas.draw()
 
 
+class FilterButton(QPushButton):
+    set_filter = Signal(list)
+    def __init__(self, text='', parent=None, limits=None):
+        super().__init__(text, parent)
+        if limits is not None:
+            self.limits = limits
+        else:
+            self.limits = [3500., 8000.]
+
+        self.clicked.connect(lambda: self.set_filter.emit(self.limits))
+
+
 class SetBorders(QDialog):
     newBorders = Signal(list)
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -168,6 +184,16 @@ class SetBorders(QDialog):
         self.y_box = PairLabledSpinBox('y_min', 'y_max')
         self.l_box = PairLabledSpinBox('l_min', 'l_max',
                                        val_type='float')
+        filters = {"u": [3000, 4000],
+                   "g": [4000, 5350],
+                   "r": [5500, 6800],
+                   "i": [6900, 8200]}
+
+        self.filter_buttons = dict()
+        filt_layout = QHBoxLayout()
+        for f in filters:
+            self.filter_buttons[f] = FilterButton(f, self, filters[f])
+            filt_layout.addWidget(self.filter_buttons[f])
 
         val_layout = QHBoxLayout()
         val_layout.addWidget(self.x_box)
@@ -180,6 +206,7 @@ class SetBorders(QDialog):
         layout = QVBoxLayout()
         layout.addWidget(self.toolbar)
         layout.addWidget(self.fig)
+        layout.addLayout(filt_layout)
         layout.addLayout(val_layout)
         layout.addLayout(b_layout)
         layout.setStretch(1, 1)
@@ -193,6 +220,8 @@ class SetBorders(QDialog):
         self.l_box.maxChanged.connect(self.maxl_changed)
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self.apply_borders)
+        for f in self.filter_buttons.values():
+            f.set_filter.connect(self.l_box.set_values)
 
     def add_image(self, frame):
         self.img = frame.data
