@@ -17,6 +17,7 @@ from astropy.coordinates import SkyCoord, FK5, Angle, ICRS
 import reproject
 import time
 from scipy import optimize
+from copy import deepcopy
 
 # from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
@@ -219,11 +220,18 @@ class InterpParams:
         """
         slit_pa = slit.pa
         slitpos = slit.refcoord.fk5
+        # slit length and width in arcsecs
+        slit_length = slit.npix * slit.scale
+        slit_width = slit.width
 
         if cdelt is None:
             cdelt = (0.5 * u.arcsec).to(u.deg).value
         if shape is None:
-            shape = (500, 1000)
+            darcsec = 92
+            cdeltarcsec = cdelt * 3600
+            nx = int((slit_width + 2 * darcsec)/cdeltarcsec)
+            ny = int((slit_length + 2 * darcsec)/cdeltarcsec)
+            shape = (nx, ny)
         if center is None:
             center = [shape[0] / 2.0, shape[1] / 2.0]
 
@@ -245,14 +253,14 @@ class InterpParams:
         w_header['NAXIS'] = 2
         w_header['NAXIS1'], w_header['NAXIS2'] = self.slit_wcs.pixel_shape
 
-        self.slit = slit
+        self.slit = deepcopy(slit)
         self.slit_hdr = w_header
         return self.slit_wcs, w_header
 
     def rotate_image(self, slit=None):
         t = time.perf_counter()
         if slit is not None:
-            self.slit = slit
+            # self.slit = slit
             self.make_slit_wcs(slit)
         if self.image_hdu is not None:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
@@ -280,11 +288,36 @@ class InterpParams:
 
         plt.show()
 
-    def get_flux(self, slitpos, high=None, low=None, width=None, init_pos=None):
+    def get_flux(self, slitpos, high=None, low=None, width=None, init_pos=None,
+                 allow_reproject=True):
+        """
+
+        Parameters
+        ----------
+        slitpos : SlitParams or astropy.coordinates.SkyCoord
+        high : astropy.units.Quantity or None, optional, default is None
+            distance between reference coordinates of the given slit
+            and its top edge
+        low : astropy.units.Quantity or None, optional, default is None
+            distance between reference coordinates of the given slit
+            and its bottom edge
+        width : astropy.units.Quantity or None, optional, default is None
+            width of the slit
+        init_pos : np.ndarray
+            position relative to slit reference coordinate (crpix) on which to
+            interpolate the image flux
+
+        Returns
+        -------
+
+        """
         if type(slitpos) is SlitParams:
-            if np.abs(slitpos.pa - self.slit.pa) > 0.01:
+            shift = self.slit.refcoord.separation(slitpos.refcoord)
+            if (np.abs(slitpos.pa - self.slit.pa) > 0.01
+                    or shift.to(u.arcsec).value > 92) and allow_reproject:
                 print('yes')
                 self.rotate_image(slitpos)
+
             high = slitpos.pos.max() * u.arcsec
             low = slitpos.pos.min() * u.arcsec
             halfw = slitpos.width * u.arcsec / 2.
@@ -794,12 +827,12 @@ class PlotWidget(QWidget):
             if self.x_input.checkbox.isChecked():
                 dra = 0
             else:
-                dra = 200
+                dra = 100
 
             if self.y_input.checkbox.isChecked():
                 ddec = 0
             else:
-                ddec = 200
+                ddec = 100
         elif (self.along_input.checkbox.isChecked()
               or self.perp_input.checkbox.isChecked()):
             mode = 'slit'
@@ -809,12 +842,12 @@ class PlotWidget(QWidget):
             if self.along_input.checkbox.isChecked():
                 dra = 0
             else:
-                dra = 60
+                dra = 30
 
             if self.perp_input.checkbox.isChecked():
                 ddec = 0
             else:
-                ddec = 60
+                ddec = 30
         else:
             mode = 'eq'
             coords = [self.slit.refcoord.ra.to(u.hourangle).value,
@@ -972,7 +1005,7 @@ class PlotWidget(QWidget):
         loc_slit.add_limits(lims)
         loc_slit.set_pos(plotspec.pos)
         loc_slit.from_fields(ra, dec, pa, scale)
-        pos, flux = interpparams.get_flux(loc_slit)
+        pos, flux = interpparams.get_flux(loc_slit, allow_reproject=True)
         q = correlation(flux, plotspec.flux)
         return q
 
