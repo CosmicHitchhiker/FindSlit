@@ -223,17 +223,20 @@ class InterpParams:
         # slit length and width in arcsecs
         slit_length = slit.npix * slit.scale
         slit_width = slit.width
+        slit_center_shift = slit.npix * 0.5 - slit.crpix
 
         if cdelt is None:
             cdelt = (0.5 * u.arcsec).to(u.deg).value
+        cdeltarcsec = cdelt * 3600
         if shape is None:
             darcsec = 92
-            cdeltarcsec = cdelt * 3600
             nx = int((slit_width + 2 * darcsec)/cdeltarcsec)
             ny = int((slit_length + 2 * darcsec)/cdeltarcsec)
             shape = (nx, ny)
         if center is None:
-            center = [shape[0] / 2.0, shape[1] / 2.0]
+            refpix_shift = slit_center_shift * slit.scale / cdeltarcsec
+            print(refpix_shift)
+            center = [shape[0] / 2.0, shape[1] / 2.0 - refpix_shift]
 
         self.slit_wcs = WCS(naxis=2)
         self.slit_wcs.wcs.cdelt = [cdelt, cdelt]
@@ -266,6 +269,7 @@ class InterpParams:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
             np.nan_to_num(self.image_rotated, False)
+            print(self.image_rotated)
         print('reproject time ', time.perf_counter() - t)
 
     @Slot()
