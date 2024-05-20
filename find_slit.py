@@ -43,7 +43,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
-from slitPolygon import slitPolygon
+from slitPolygon import slitPolygon, rotatedTriangle
 from SetBorders import SetBorders
 
 matplotlib.use('QtAgg')
@@ -272,7 +272,8 @@ class InterpParams:
     def plot_image(self, slitpos=None):
         plt.figure()
         plt.subplot(projection=self.slit_wcs)
-        plt.imshow(self.image_rotated)
+        norm = simple_norm(self.image_rotated, 'linear', percent=99.3)
+        plt.imshow(self.image_rotated, norm=norm, cmap='bone')
 
         if slitpos is not None:
             high = slitpos.pos.max() * u.arcsec
@@ -283,9 +284,13 @@ class InterpParams:
                               frame=slitpos.frame)
             x, y = self.slit_wcs.world_to_pixel(slitpos.refcoord)
             plt.plot(x, y, 'ro')
-            plt.plot(*self.slit_wcs.world_to_pixel(bottom), 'bo')
-            plt.plot(*self.slit_wcs.world_to_pixel(top), 'bo')
+            bpix = [*self.slit_wcs.world_to_pixel(bottom)]
+            tpix = [*self.slit_wcs.world_to_pixel(top)]
+            linex, liney = [bpix[0], tpix[0]], [bpix[1], tpix[1]]
 
+            plt.plot(linex, liney, color='tab:olive')
+            plt.plot(*self.slit_wcs.world_to_pixel(bottom), 'o', color='tab:olive')
+            plt.plot(*self.slit_wcs.world_to_pixel(top), '^', color='tab:olive')
         plt.show()
 
     def get_flux(self, slitpos, high=None, low=None, width=None, init_pos=None,
@@ -306,6 +311,9 @@ class InterpParams:
         init_pos : np.ndarray
             position relative to slit reference coordinate (crpix) on which to
             interpolate the image flux
+        allow_reproject : bool, optional, default is True
+            if True, reproject if need to (when rotation angle is changed or
+            given position is outside the rotated image)
 
         Returns
         -------
@@ -371,6 +379,7 @@ class PlotImage:
 
     def plot_slit(self, slit):
         if self.axes_obj.patches:
+            list(self.axes_obj.patches)[1].remove()
             list(self.axes_obj.patches)[0].remove()
             # self.figure.canvas.draw()
 
@@ -381,6 +390,11 @@ class PlotImage:
                         edgecolor='tab:olive', facecolor='none', lw=0.5,
                         transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(s)
+        t = rotatedTriangle([0 * u.deg, h_up], 5 * slit.width * u.arcsec,
+                            theta=0 * u.deg, edgecolor='tab:olive',
+                            facecolor='tab:olive', lw=0.5,
+                            transform=self.axes_obj.get_transform(slit.frame))
+        self.axes_obj.add_patch(t)
         self.figure.canvas.draw()
 
 
@@ -432,12 +446,14 @@ class PlotSpec:
             self.figure.canvas.flush_events()
 
     def plot_spectrum_flux(self):
-        self.spec_flux_line, = self.axes_obj.plot(self.pos, self.norm_flux, 'b')
+        self.spec_flux_line, = self.axes_obj.plot(self.pos, self.norm_flux, 'b',
+                                                  label='spectrum')
 
     def plot_image_flux(self, pos, flux):
         if len(self.axes_obj.lines) > 1:
             self.axes_obj.lines[1].remove()
-        self.axes_obj.plot(pos, norm_vector(flux), 'r')
+        self.axes_obj.plot(pos, norm_vector(flux), 'r', label='image')
+        self.axes_obj.legend()
         self.figure.canvas.draw()
 
 
@@ -817,6 +833,7 @@ class PlotWidget(QWidget):
 
     @Slot()
     def find_optimal_parameters(self):
+        self.interp_params.rotate_image(self.slit)
         if (self.x_input.checkbox.isChecked()
                 or self.y_input.checkbox.isChecked()):
             mode = 'im'
