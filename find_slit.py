@@ -1044,7 +1044,7 @@ class PlotWidget(QWidget):
         if 'EPOCH' in spec_header_new:
             hdul[0].header['EPOCH'] = 2000.0
         hdul[0].header['POSANG'] = self.PA_input.value()
-        hdul.writeto(files_path)
+        hdul.writeto(files_path, overwrite=True)
 
         print(files_path)
         pass
