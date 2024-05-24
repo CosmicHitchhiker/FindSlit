@@ -88,8 +88,11 @@ class SlitParams:
                                      unit=(u.hourangle, u.deg))
 
         # print(self.refcoord)
+        if 'CDELT2' in hdr:
+            self.scale = hdr['CDELT2']  # arcsec/pix
+        else:
+            self.scale = 0.3
 
-        self.scale = hdr['CDELT2']  # arcsec/pix
         self.npix = hdr['NAXIS2']
 
         if 'CRPIX2' in hdr:
@@ -158,12 +161,17 @@ class SlitParams:
 
     @staticmethod
     def parse_tds_slit(slitname):
-        if slitname == '1asec':
-            return 1.0
-        elif slitname == '1.5asec':
-            return 1.5
-        elif slitname == '10asec':
-            return 10
+        if isinstance(slitname, (int, float)):
+            return slitname
+
+        if slitname[-4:] == 'asec':
+            return float(slitname[:-4])
+        # if slitname == '1asec':
+        #     return 1.0
+        # elif slitname == '1.5asec':
+        #     return 1.5
+        # elif slitname == '10asec':
+        #     return 10
         print('Unknown SLIT keyword')
         return 1.0
 
@@ -419,7 +427,11 @@ class PlotSpec:
 
     def coords_from_header(self, axes=1):
         naxis = self.hdr['NAXIS' + str(axes)]
-        cdelt = self.hdr['CDELT' + str(axes)]
+
+        if ('CDELT' + str(axes)) in self.hdr:
+            cdelt = self.hdr['CDELT' + str(axes)]
+        else:
+            cdelt = 0.3
         if ('CRPIX' + str(axes)) in self.hdr:
             crpix = self.hdr['CRPIX' + str(axes)]
         else:
