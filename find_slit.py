@@ -45,6 +45,7 @@ from OpenFile import OpenFile
 from radecSpinBox import radecSpinBox
 from slitPolygon import slitPolygon, rotatedTriangle
 from SetBorders import SetBorders
+from SetBias import SetBias
 
 matplotlib.use('QtAgg')
 
@@ -181,6 +182,7 @@ class InterpParams:
 
     def __init__(self, image_hdu=None, slit=None):
         self.image_hdu = image_hdu
+        self.bias = 0.
         if image_hdu is not None:
             self.slit_wcs = WCS(image_hdu.header)
             self.slit_hdr = image_hdu.header
@@ -275,6 +277,7 @@ class InterpParams:
         if self.image_hdu is not None:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
+            self.image_rotated -= self.bias
             np.nan_to_num(self.image_rotated, False)
         print('reproject time ', time.perf_counter() - t)
 
@@ -366,6 +369,13 @@ class InterpParams:
             pos = slitpos.pos[:]
 
         return pos, flux
+
+    @Slot()
+    def change_bias(self, bias):
+        self.image_rotated += self.bias
+        self.bias = bias * np.max(self.image_hdu.data) / 100.
+        self.image_rotated -= self.bias
+
 
 
 class PlotImage:
@@ -543,6 +553,7 @@ class PlotWidget(QWidget):
         self.slit = SlitParams()
         self.init_slit_frame = self.slit.frame
         self.border_w = SetBorders(self)
+        self.bias_w = SetBias(self)
         self.borders = None
 
         # create widgets
@@ -587,6 +598,7 @@ class PlotWidget(QWidget):
         self.saveres_button = QPushButton(text='Save Results')
         self.calculate_button = QPushButton(text='Find optimal parameters')
         self.border_button = QPushButton(text='Set borders')
+        self.bias_button = QPushButton(text='Set bias')
 
         self.interp_shortcut = QShortcut(QKeySequence('Alt+I'), self)
 
@@ -612,6 +624,7 @@ class PlotWidget(QWidget):
         self.redraw_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.find_optimal_parameters)
         self.border_button.clicked.connect(self.set_borders)
+        self.bias_button.clicked.connect(self.set_bias)
         self.ra_input.spinbox.valueChanged.connect(lambda: self.update_plots('eq'))
         self.dec_input.spinbox.valueChanged.connect(lambda: self.update_plots('eq'))
         self.x_input.spinbox.valueChanged.connect(lambda: self.update_plots('im'))
@@ -623,6 +636,7 @@ class PlotWidget(QWidget):
         self.border_w.accepted.connect(self.spec_borders_changed)
         self.saveres_button.clicked.connect(self.save_results)
         self.interp_shortcut.activated.connect(self.plot_rot_image)
+        self.bias_w.image_bias.valueChanged.connect(self.set_im_bias)
 
     def __setLayout(self):
         # Layout
@@ -633,6 +647,7 @@ class PlotWidget(QWidget):
         l_button_layout = QHBoxLayout()
         l_button_layout.addWidget(self.calculate_button)
         l_button_layout.addWidget(self.border_button)
+        l_button_layout.addWidget(self.bias_button)
 
         left_layout = QFormLayout()
         left_layout.addRow(self.spec_field)
@@ -1001,6 +1016,15 @@ class PlotWidget(QWidget):
     @Slot()
     def set_borders(self):
         self.border_w.show()
+
+    @Slot()
+    def set_bias(self):
+        self.bias_w.show()
+
+    @Slot()
+    def set_im_bias(self, bias):
+        self.interp_params.change_bias(bias)
+        self.update_plots()
 
     @staticmethod
     def qfunc_eq(params, plotspec, interpparams, transform_f):
