@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QStyle,
 )
+from pathlib import Path
 
 
 class OpenFile(QWidget):
@@ -22,7 +23,7 @@ class OpenFile(QWidget):
         self.fits_box.setPlaceholderText(text)
         self.files = None
         self.mode = mode
-        self.dir = "/home/astrolander/Documents/Work/DATA"
+        self.dir = str(Path.home())
 
         vlayout = QVBoxLayout(self)
         vlayout.addWidget(self.fits_box)

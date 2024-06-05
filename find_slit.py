@@ -373,9 +373,9 @@ class InterpParams:
     @Slot()
     def change_bias(self, bias):
         self.image_rotated += self.bias
-        self.bias = bias * np.max(self.image_hdu.data) / 100.
+        step = (np.max(self.image_hdu.data) - np.min(self.image_hdu.data))/100.
+        self.bias = bias * step
         self.image_rotated -= self.bias
-
 
 
 class PlotImage:
@@ -1073,13 +1073,14 @@ class PlotWidget(QWidget):
                                                  self.spec_field.dir,
                                                  "All (*)")[0]
         hdul = fits.open(self.spec_field.files)
-        spec_header_new = hdul[0].header
         hdul[0].header['CDELT2'] = self.scale_input.value()
         hdul[0].header['RA'] = self.ra_input.getText()
         hdul[0].header['DEC'] = self.dec_input.getText()
-        if 'EPOCH' in spec_header_new:
+        if 'EPOCH' in hdul[0].header:
             hdul[0].header['EPOCH'] = 2000.0
         hdul[0].header['POSANG'] = self.PA_input.value()
+        if 'CRPIX2' not in hdul[0].header:
+            hdul[0].header['CRPIX2'] = self.slit.crpix_init
         hdul.writeto(files_path, overwrite=True)
 
         print(files_path)
