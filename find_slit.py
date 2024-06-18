@@ -51,10 +51,39 @@ matplotlib.use('QtAgg')
 
 
 def norm_vector(vec):
-    return vec / np.linalg.norm(vec)
+    """
+    Parameters
+    ----------
+    vec : array_like
+        Input vector.
+
+    Returns
+    -------
+    array_like
+        Normalized vector.
+    """
+    try:
+        return vec / np.linalg.norm(vec)
+    except TypeError:
+        raise TypeError('Input should be a numerical array-like object')
 
 
 def correlation(vec1, vec2):
+    """
+    Parameters
+    ----------
+    vec1 : array_like
+        The first vector for correlation calculation.
+    vec2 : array_like
+        The second vector for correlation calculation.
+
+    Returns
+    -------
+    float
+        The correlation between the two input vectors `vec1` and `vec2`, calculated using the arccosine
+        of the dot product of the normalized vectors.
+
+    """
     if not np.shape(vec1) == np.shape(vec2):
         raise IndexError('vectors shoud have same dimensions to find their correlation')
     a = norm_vector(vec1)
@@ -78,6 +107,17 @@ class SlitParams:
         self.pos = self.pixpos * self.scale
 
     def from_header(self, hdr):
+        """
+        Parameters
+        ----------
+        hdr : dict
+            The header containing the necessary information for calibration.
+
+        Returns
+        -------
+        None
+
+        """
         if 'EPOCH' in hdr:
             equinox = "J" + str(hdr['EPOCH'])
             # print(equinox)
@@ -906,12 +946,12 @@ class PlotWidget(QWidget):
             if self.ra_input.checkbox.isChecked():
                 dra = 0
             else:
-                dra = (60 * u.arcsec).to(u.hourangle).value
+                dra = (30 * u.arcsec).to(u.hourangle).value
 
             if self.dec_input.checkbox.isChecked():
                 ddec = 0
             else:
-                ddec = (60 * u.arcsec).to(u.deg).value
+                ddec = (30 * u.arcsec).to(u.deg).value
 
         if self.scale_input.checkbox.isChecked():
             dscale = 0
