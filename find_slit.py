@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QCheckBox,
     QLabel,
+    QMessageBox,
+    QProgressDialog,
 )
 from PySide6.QtGui import QKeySequence, QShortcut
 
@@ -988,8 +990,10 @@ class PlotWidget(QWidget):
         print('Qval before ', self.qfunc_eq(params, self.spec_plot,
                                             self.interp_params, transform_f))
         optargs = (self.spec_plot, self.interp_params, transform_f)
+        progress_box = QProgressDialog("Searching for optimal parameters",
+                                       '', 0, 100, self)
         good_params = self.try_different_minimizers(self.qfunc_eq, params,
-                                                    optargs, bounds)
+                                                    optargs, bounds, progress_box=progress_box)
         print(good_params)
         # print(good_params.x)
         print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
@@ -1026,7 +1030,8 @@ class PlotWidget(QWidget):
         print('shift is ', initcoord.separation(rescoord))
 
     @staticmethod
-    def try_different_minimizers(func, params, optargs, bounds, verbose=True):
+    def try_different_minimizers(func, params, optargs, bounds, verbose=True,
+                                 progress_box=None):
         """This function use different  methods of scipy.optimize.minimize
         untill they all will consider result as minimum.
 
@@ -1054,7 +1059,9 @@ class PlotWidget(QWidget):
         q = func(params, *optargs)
         best_params = params
         good_result = False
+        steps = 0
         while not good_result:
+            progress_box.setValue(steps)
             q_old = q
             for m in methods:
                 if verbose: print(m)
@@ -1065,10 +1072,13 @@ class PlotWidget(QWidget):
                     q = res.fun
                     if verbose: print('BEST!!!', m)
                     best_params = res.x
+                steps += 1
             params = best_params
             # if result hasn't changed after checking every minimizer,
             # then consider it's good
             good_result = (q == q_old)
+        steps = 100
+        progress_box.setValue(steps)
         return res
 
     @Slot()
