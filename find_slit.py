@@ -714,8 +714,12 @@ class PlotWidget(QWidget):
         self.bias_button = QPushButton(text='Set bias')
 
         self.interp_shortcut = QShortcut(QKeySequence('Alt+I'), self)
-        self.progress_box = QMessageBox()
-        self.progress_box.setText("Searching for optimal parameters")
+        self.progress_box = QMessageBox(QMessageBox.NoIcon,
+                                        "Optimal parameters",
+                                        "Calculation in progress",
+                                        buttons=QMessageBox.NoButton)
+        self.progress_box.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        # self.progress_box.setText("Searching for optimal parameters")
         self.threadpool = QThreadPool()
 
         self.__setLayout()
@@ -981,7 +985,7 @@ class PlotWidget(QWidget):
 
     @Slot()
     def find_optimal_parameters(self):
-        self.progress_box.exec()
+        self.progress_box.show()
         self.interp_params.rotate_image(self.slit)
         if (self.x_input.checkbox.isChecked()
                 or self.y_input.checkbox.isChecked()):
@@ -1091,6 +1095,7 @@ class PlotWidget(QWidget):
         rescoord = SkyCoord(self.slit.refcoord.ra.to(u.hourangle),
                             self.slit.refcoord.dec.to(u.deg))
         print('shift is ', initcoord.separation(rescoord))
+        self.progress_box.done(0)
 
     @staticmethod
     def try_different_minimizers(func, params, optargs, bounds, verbose=True):
