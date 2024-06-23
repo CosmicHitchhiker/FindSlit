@@ -25,18 +25,18 @@ and the wavelength coordinate is the X-coordinate (horizontal, has index 1 in th
 can be set in any linear units (e.g. ADU/pix, erg/s/cm^2, but not the magnitude).
 
 The necessary keywords for the header of this HDU are:
- - RA
- - DEC
- - NAXIS2
+ - RA - right ascension of the spectrum CRPIX2
+ - DEC - declination of the spectrum CRPIX2
+ - NAXIS2 - number of pixels along slit
 
 The optional but important keywords are:
- - EPOCH
- - CDELT2
- - CRPIX2
- - POSANG
- - PARANGLE and ROTANGLE
- - SLIT
- - CDELT1, CRPIX1, CRVAL1
+ - EPOCH - reference epoch (for RA and DEC), 2000.0 by default
+ - CDELT2 - size of a pixel along slit in arcseconds, 0.3 "/pix by default
+ - CRPIX2 - reference position (pix) along slit, center of the slit by default
+ - POSANG - positional angle of the slit in degrees, 0 by default
+ - PARANGLE and ROTANGLE - alternative way to set positional angle, if these values are set, then POSANG=PARANGLE-ROTANGLE+132.5
+ - SLIT - width of the slit in arcsec, 1 by default; this value can also be parsed from 'Nasec'-like SLIT keywoard, where N is integer or float
+ - CDELT1, CRPIX1, CRVAL1 - parameters that are necessary if you want to set wavelength limits, they describe wavelength coordinate in the spectrum
 
 #### Photometry
 The photometry of an object/sky region also should be a fits-file with a 2D image in its first HDU. It should
@@ -165,7 +165,8 @@ Sometimes you may need additional steps:
  - Set borders (limits) for wavelength range and y-axis coordinate in the spectrum
  - Subtract bias
 
-It is also possible to set some parameters in the command line. For more information type `./find_slit.py -h` in the terminal
+It is also possible to set some parameters in the command line. For more information type `./find_slit.py -h` in the terminal.
+_This feature is not comletely implemented yet._
 
 ## Contact information and bug reports
 If you want to discuss whis software, you can contact me directely on GitHub or send an email to landervyu(at)gmail.com
