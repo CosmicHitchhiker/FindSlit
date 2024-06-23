@@ -573,6 +573,24 @@ class ParameterField(QWidget):
             return self.spinbox.getText()
 
 
+class PaField(ParameterField):
+    def __init__(self, spinbox='double', label='',
+                 minval: (int, float, Angle, u.Quantity) = 0,
+                 maxval: (int, float, Angle, u.Quantity) = 100,
+                 dec=2):
+        super().__init__(spinbox, label, minval, maxval, dec)
+        self.inverse_shortcut = QShortcut(QKeySequence('Shift+Up'), self)
+
+        self.inverse_shortcut.activated.connect(self.rot_180)
+
+    @Slot()
+    def rot_180(self):
+        if self.spinbox.hasFocus():
+            val = self.spinbox.value()
+            val = (val + 180.) % 360.
+            self.spinbox.setValue(val)
+
+
 class PlotWidget(QWidget):
     """main window"""
 
@@ -605,7 +623,7 @@ class PlotWidget(QWidget):
         self.image_field = OpenFile(text='image', mode='o')
         self.spec_field = OpenFile(text='spectrum', mode='o')
 
-        self.PA_input = ParameterField('double', label='PA, deg',
+        self.PA_input = PaField('double', label='PA, deg',
                                        minval=-360, maxval=360, dec=1)
 
         self.scale_input = ParameterField('double', label='Scale "/pix',
@@ -989,8 +1007,8 @@ class PlotWidget(QWidget):
             self.x_input.setValue(good_params.x[0])
             self.y_input.setValue(good_params.x[1])
         elif mode == 'slit':
-            self.along_input_input.setValue(good_params.x[0])
-            self.perp_input_input.setValue(good_params.x[1])
+            self.along_input.setValue(good_params.x[0])
+            self.perp_input.setValue(good_params.x[1])
 
         self.PA_input.setValue(good_params.x[2])
         self.scale_input.setValue(good_params.x[3])
