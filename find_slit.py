@@ -24,7 +24,7 @@ from matplotlib.figure import Figure
 # noinspection PyUnresolvedReferences
 from matplotlib.backends.backend_qtagg import FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Slot, Signal, QRunnable, QThreadPool, QObject
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -593,6 +593,59 @@ class PaField(ParameterField):
             self.spinbox.setValue(val)
 
 
+class WorkerSignals(QObject):
+    '''
+    Defines the signals available from a running worker thread.
+
+    Supported signals are:
+
+    finished
+        No data
+
+    error
+        tuple (exctype, value, traceback.format_exc() )
+
+    result
+        object data returned from processing, anything
+
+    '''
+    finished = Signal()  # QtCore.Signal
+    error = Signal(tuple)
+    result = Signal(object)
+
+
+class Worker(QRunnable):
+    # result = Signal(int)
+    '''
+    Worker thread
+
+    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
+
+    :param callback: The function callback to run on this worker thread. Supplied args and
+                     kwargs will be passed through to the runner.
+    :type callback: function
+    :param args: Arguments to pass to the callback function
+    :param kwargs: Keywords to pass to the callback function
+
+    '''
+
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+        # Store constructor arguments (re-used for processing)
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+    @Slot()  # QtCore.Slot
+    def run(self):
+        '''
+        Initialise the runner function with passed args, kwargs.
+        '''
+        res = self.fn(*self.args, **self.kwargs)
+        self.signals.result.emit(res)
+
+
 class PlotWidget(QWidget):
     """main window"""
 
@@ -661,6 +714,9 @@ class PlotWidget(QWidget):
         self.bias_button = QPushButton(text='Set bias')
 
         self.interp_shortcut = QShortcut(QKeySequence('Alt+I'), self)
+        self.progress_box = QMessageBox()
+        self.progress_box.setText("Searching for optimal parameters")
+        self.threadpool = QThreadPool()
 
         self.__setLayout()
 
@@ -925,6 +981,7 @@ class PlotWidget(QWidget):
 
     @Slot()
     def find_optimal_parameters(self):
+        self.progress_box.exec()
         self.interp_params.rotate_image(self.slit)
         if (self.x_input.checkbox.isChecked()
                 or self.y_input.checkbox.isChecked()):
@@ -990,10 +1047,15 @@ class PlotWidget(QWidget):
         print('Qval before ', self.qfunc_eq(params, self.spec_plot,
                                             self.interp_params, transform_f))
         optargs = (self.spec_plot, self.interp_params, transform_f)
-        progress_box = QProgressDialog("Searching for optimal parameters",
-                                       '', 0, 100, self)
-        good_params = self.try_different_minimizers(self.qfunc_eq, params,
-                                                    optargs, bounds, progress_box=progress_box)
+        worker = Worker(self.try_different_minimizers, self.qfunc_eq, params,
+                                                    optargs, bounds)
+        worker.signals.result.connect(lambda x: self.minimization_finished(x, mode, transform_f))
+        # worker.signals.result.connect(print)
+        self.threadpool.start(worker)
+        # good_params = self.try_different_minimizers(self.qfunc_eq, params,
+        #                                             optargs, bounds)
+
+    def minimization_finished(self, good_params, mode, transform_f):
         print(good_params)
         # print(good_params.x)
         print(self.qfunc_eq(good_params.x, self.spec_plot, self.interp_params,
@@ -1019,6 +1081,7 @@ class PlotWidget(QWidget):
         self.update_values('scale')
         for i in self.inputs_list:
             i.blockSignals(False)
+        self.calculate_button.setText('Find optimal parameters')
         # self.slit.from_fields(good_params.x[0] * u.hourangle,
         #                       good_params.x[1] * u.deg,
         #                       good_params.x[2], good_params.x[3])
@@ -1030,8 +1093,7 @@ class PlotWidget(QWidget):
         print('shift is ', initcoord.separation(rescoord))
 
     @staticmethod
-    def try_different_minimizers(func, params, optargs, bounds, verbose=True,
-                                 progress_box=None):
+    def try_different_minimizers(func, params, optargs, bounds, verbose=True):
         """This function use different  methods of scipy.optimize.minimize
         untill they all will consider result as minimum.
 
@@ -1059,9 +1121,7 @@ class PlotWidget(QWidget):
         q = func(params, *optargs)
         best_params = params
         good_result = False
-        steps = 0
         while not good_result:
-            progress_box.setValue(steps)
             q_old = q
             for m in methods:
                 if verbose: print(m)
@@ -1072,13 +1132,10 @@ class PlotWidget(QWidget):
                     q = res.fun
                     if verbose: print('BEST!!!', m)
                     best_params = res.x
-                steps += 1
             params = best_params
             # if result hasn't changed after checking every minimizer,
             # then consider it's good
             good_result = (q == q_old)
-        steps = 100
-        progress_box.setValue(steps)
         return res
 
     @Slot()
