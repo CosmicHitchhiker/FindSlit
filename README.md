@@ -73,7 +73,7 @@ chmod a+x find_slit.py
 ### Interface
 
  <p align="center">
-  <img src="images/Interface.jpg" width="100%" alt="Example">
+  <img src="images/Interface.gif" width="100%" alt="Example">
 </p>
 
 #### Images
