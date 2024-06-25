@@ -229,6 +229,7 @@ class InterpParams:
             self.slit_wcs = WCS(image_hdu.header)
             self.slit_hdr = image_hdu.header
             self.image_rotated = image_hdu.data
+            self.nanmask = np.isnan(self.image_rotated)
         if slit is not None:
             self.slit = slit
             self.make_slit_wcs(slit)
@@ -319,6 +320,7 @@ class InterpParams:
         if self.image_hdu is not None:
             self.image_rotated, _ = reproject.reproject_interp(self.image_hdu,
                                                                self.slit_hdr)
+            self.nanmask = np.isnan(self.image_rotated)
             self.image_rotated -= self.bias
             np.nan_to_num(self.image_rotated, False)
         print('reproject time ', time.perf_counter() - t)
@@ -418,6 +420,7 @@ class InterpParams:
         step = (np.max(self.image_hdu.data) - np.min(self.image_hdu.data))/100.
         self.bias = bias * step
         self.image_rotated -= self.bias
+        self.image_rotated[self.nanmask] = 0
 
 
 class PlotImage:
