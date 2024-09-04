@@ -442,23 +442,43 @@ class PlotImage:
         self.axes_obj.imshow(self.image, cmap='bone', norm=self.norm_im)
 
     def plot_slit(self, slit):
-        if self.axes_obj.patches:
-            list(self.axes_obj.patches)[1].remove()
+        while self.axes_obj.patches:
             list(self.axes_obj.patches)[0].remove()
+            # list(self.axes_obj.patches)[0].remove()
+            # list(self.axes_obj.patches)[2].remove()
+            # list(self.axes_obj.patches)[3].remove()
             # self.figure.canvas.draw()
 
         h_up = slit.pos.max() * u.arcsec
         h_down = -slit.pos.min() * u.arcsec
+        # slit
         s = slitPolygon([0 * u.deg, 0 * u.deg], slit.width * u.arcsec, h_up, h_down,
                         theta=0 * u.deg,
                         edgecolor='tab:olive', facecolor='none', lw=0.5,
                         transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(s)
+        # direction of the slit
         t = rotatedTriangle([0 * u.deg, h_up], 5 * slit.width * u.arcsec,
                             theta=0 * u.deg, edgecolor='tab:olive',
                             facecolor='tab:olive', lw=0.5,
                             transform=self.axes_obj.get_transform(slit.frame))
         self.axes_obj.add_patch(t)
+        # centre of the slit
+        c1 = slitPolygon([0 * u.deg, 0 * u.deg], 5 * slit.width * u.arcsec,
+                         0 * u.deg, 0 * u.deg,
+                        theta=0 * u.deg,
+                        edgecolor='green', facecolor='none', lw=1.5,
+                        transform=self.axes_obj.get_transform(slit.frame))
+        c2 = slitPolygon([0 * u.deg, 0 * u.deg], 5 * slit.width * u.arcsec,
+                         0 * u.deg, 0 * u.deg,
+                         theta=90 * u.deg,
+                         edgecolor='green', facecolor='none', lw=1.5,
+                         transform=self.axes_obj.get_transform(slit.frame))
+        self.axes_obj.add_patch(c1)
+        self.axes_obj.add_patch(c2)
+        # pix_ref = self.wcs.world_to_pixel(slit.refcoord)
+        #
+        # self.axes_obj.plot(pix_ref[0], pix_ref[1], 'o', color='tab:olive')
         self.figure.canvas.draw()
 
 
