@@ -39,7 +39,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QLabel,
     QMessageBox,
-    QProgressDialog,
 )
 from PySide6.QtGui import QKeySequence, QShortcut
 
@@ -95,16 +94,25 @@ def correlation(vec1, vec2):
 
 class SlitParams:
     def __init__(self):
+        # coordinates of the crpix2
         self.refcoord = SkyCoord(0, 0, unit=(u.hourangle, u.deg))
+        # relative crpix2 (not from 0 pixel, but from ymin)
         self.crpix = 0.
-        self.crpix_init = 0.
+        # absolute crpix2
+        self.crpix_header = 0.
+        # number of pixels in y direction (after cropping)
         self.npix = 0
+        # number of pixels before cropping image
         self.npix_init = 0
+        # position angle of the slit
         self.pa = 0.
+        # scale across y axis ("/pix)
         self.scale = 1.
         # slit width (arcsec)
         self.width = 1.
+        # slit coordinate frame: (0,0) - refcoord, lon axis - direction of slit
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
+        # ???
         self.pixpos = np.array([- self.crpix, self.npix - self.crpix])
         self.pos = self.pixpos * self.scale
 
@@ -138,10 +146,12 @@ class SlitParams:
 
         self.npix = hdr['NAXIS2']
 
+        # Note that in fits-standart pixel numeration starts with 1
+        # but in numpy indexing begins at 0
         if 'CRPIX2' in hdr:
-            self.crpix = hdr['CRPIX2']
+            self.crpix = hdr['CRPIX2'] - 1
         else:
-            self.crpix = hdr['NAXIS2'] / 2
+            self.crpix = hdr['NAXIS2'] / 2 - 1
 
         if 'POSANG' in hdr:
             # TDS
@@ -165,9 +175,9 @@ class SlitParams:
             self.width = 1.0
 
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
-        self.crpix_init = self.crpix
+        self.crpix_header = self.crpix
         self.npix_init = self.npix
-        self.pixpos = np.array([- self.crpix, self.npix - self.crpix])
+        self.pixpos = (np.arange(self.npix) - self.crpix)
         self.pos = self.pixpos * self.scale
 
     def from_fields(self, ra, dec, pa, scale):
@@ -178,21 +188,31 @@ class SlitParams:
                                  unit=(u.hourangle, u.deg))
         self.frame = self.refcoord.skyoffset_frame(rotation=self.pa * u.deg)
 
-    def add_limits(self, lims):
+    def add_limits(self, lims: list) -> None:
+        """
+
+        Parameters
+        ----------
+        lims : list
+            [minx, maxx, miny, maxy, crpix]
+        """
+        # miny and maxy are INCLUDED in the cropped slit
+        # miny and maxy are pixel coordinades in the initial frame
         miny, maxy = lims[2], lims[3]
-        if miny is not None:
-            self.crpix = self.crpix_init - miny
-        else:
-            self.crpix = self.crpix_init
+        if miny is None:
+            miny = 0
+        if maxy is None:
+            maxy = self.npix_init - 1
 
-        if maxy is not None:
-            self.npix = maxy - miny + 1
-        elif miny is not None:
-            self.npix = self.npix_init - miny + 1
-        else:
-            self.npix = self.npix_init
+        if len(lims) > 4:
+            new_crpix = lims[4]
+            self.crpix_header = new_crpix
 
-        self.pos = np.array([- self.crpix, self.npix - self.crpix]) * self.scale
+        self.crpix = self.crpix_header - miny
+        self.npix = maxy - miny
+
+        self.pixpos = (np.arange(self.npix) - self.crpix)
+        self.pos = self.pixpos * self.scale
 
     def set_pixpos(self, pixpos):
         self.pixpos = pixpos
@@ -209,12 +229,6 @@ class SlitParams:
 
         if slitname[-4:] == 'asec':
             return float(slitname[:-4])
-        # if slitname == '1asec':
-        #     return 1.0
-        # elif slitname == '1.5asec':
-        #     return 1.5
-        # elif slitname == '10asec':
-        #     return 10
         print('Unknown SLIT keyword')
         return 1.0
 
@@ -232,7 +246,9 @@ class InterpParams:
             self.nanmask = np.isnan(self.image_rotated)
         if slit is not None:
             self.slit = slit
-            self.make_slit_wcs(slit)
+        else:
+            self.slit = SlitParams()
+        self.make_slit_wcs(self.slit)
         self.rotate_image()
 
     def update(self, image_hdu=None, slit=None):
@@ -444,10 +460,6 @@ class PlotImage:
     def plot_slit(self, slit):
         while self.axes_obj.patches:
             list(self.axes_obj.patches)[0].remove()
-            # list(self.axes_obj.patches)[0].remove()
-            # list(self.axes_obj.patches)[2].remove()
-            # list(self.axes_obj.patches)[3].remove()
-            # self.figure.canvas.draw()
 
         h_up = slit.pos.max() * u.arcsec
         h_down = -slit.pos.min() * u.arcsec
@@ -466,9 +478,9 @@ class PlotImage:
         # centre of the slit
         c1 = slitPolygon([0 * u.deg, 0 * u.deg], 5 * slit.width * u.arcsec,
                          0 * u.deg, 0 * u.deg,
-                        theta=0 * u.deg,
-                        edgecolor='green', facecolor='none', lw=1.5,
-                        transform=self.axes_obj.get_transform(slit.frame))
+                         theta=0 * u.deg,
+                         edgecolor='green', facecolor='none', lw=1.5,
+                         transform=self.axes_obj.get_transform(slit.frame))
         c2 = slitPolygon([0 * u.deg, 0 * u.deg], 5 * slit.width * u.arcsec,
                          0 * u.deg, 0 * u.deg,
                          theta=90 * u.deg,
@@ -483,7 +495,17 @@ class PlotImage:
 
 
 class PlotSpec:
-    def __init__(self, figure, frame, borders=None):
+    def __init__(self, figure: plt.figure, frame: fits.ImageHDU,
+                 borders: list = None, slit: SlitParams = None):
+        """
+
+        Parameters
+        ----------
+        figure : plt.figure
+            parent figure to plot on
+        frame : fits.ImageHDU
+        borders
+        """
         self.figure = figure
         self.axes_obj = figure.subplots()
         if borders is not None:
@@ -496,7 +518,10 @@ class PlotSpec:
         self.norm_flux = norm_vector(self.flux)
         self.spectrum = frame.data
         self.hdr = frame.header
-        self.pos = self.coords_from_header(axes=2)[self.y_range]
+        if slit is None:
+            self.pos = self.coords_from_header(axes=2)[self.y_range]
+        else:
+            self.pos = slit.pos
         self.spec_flux_line = None
         self.plot_spectrum_flux()
 
@@ -521,11 +546,31 @@ class PlotSpec:
         return coords
 
     def update_scale(self, scale):
+        """This method was used before update_pos.
+        Now it is deprecated.
+
+        Parameters
+        ----------
+        scale : float
+
+        Returns
+        -------
+
+        """
         if self.hdr['CDELT2'] == scale:
             return
 
         self.hdr['CDELT2'] = scale
         self.pos = self.coords_from_header(axes=2)[self.y_range]
+        if self.spec_flux_line is not None:
+            self.spec_flux_line.set_xdata(self.pos)
+            self.axes_obj.relim()
+            self.axes_obj.autoscale_view()
+            self.figure.canvas.draw()
+            self.figure.canvas.flush_events()
+
+    def update_pos(self, pos):
+        self.pos = pos
         if self.spec_flux_line is not None:
             self.spec_flux_line.set_xdata(self.pos)
             self.axes_obj.relim()
@@ -579,7 +624,7 @@ class ParameterField(QWidget):
         self.setLayout(layout)
 
     @Slot()
-    def setValue(self, val):
+    def set_value(self, val):
         self.spinbox.setValue(val)
 
     def value(self):
@@ -617,7 +662,7 @@ class PaField(ParameterField):
 
 
 class WorkerSignals(QObject):
-    '''
+    """
     Defines the signals available from a running worker thread.
 
     Supported signals are:
@@ -631,7 +676,7 @@ class WorkerSignals(QObject):
     result
         object data returned from processing, anything
 
-    '''
+    """
     finished = Signal()  # QtCore.Signal
     error = Signal(tuple)
     result = Signal(object)
@@ -639,7 +684,7 @@ class WorkerSignals(QObject):
 
 class Worker(QRunnable):
     # result = Signal(int)
-    '''
+    """
     Worker thread
 
     Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
@@ -650,7 +695,7 @@ class Worker(QRunnable):
     :param args: Arguments to pass to the callback function
     :param kwargs: Keywords to pass to the callback function
 
-    '''
+    """
 
     def __init__(self, fn, *args, **kwargs):
         super(Worker, self).__init__()
@@ -662,13 +707,14 @@ class Worker(QRunnable):
 
     @Slot()  # QtCore.Slot
     def run(self):
-        '''
+        """
         Initialise the runner function with passed args, kwargs.
-        '''
+        """
         res = self.fn(*self.args, **self.kwargs)
         self.signals.result.emit(res)
 
 
+# noinspection PyUnresolvedReferences
 class PlotWidget(QWidget):
     """main window"""
 
@@ -702,7 +748,7 @@ class PlotWidget(QWidget):
         self.spec_field = OpenFile(text='spectrum', mode='o')
 
         self.PA_input = PaField('double', label='PA, deg',
-                                       minval=-360, maxval=360, dec=1)
+                                minval=-360, maxval=360, dec=1)
 
         self.scale_input = ParameterField('double', label='Scale "/pix',
                                           dec=4)
@@ -747,8 +793,8 @@ class PlotWidget(QWidget):
 
         self.__setLayout()
 
-        self.PA_input.setValue(pa)
-        self.scale_input.setValue(scale)
+        self.PA_input.set_value(pa)
+        self.scale_input.set_value(scale)
         # if filename of an image is set in the terminal
         if obj is not None:
             self.image_field.fill_string(obj)
@@ -759,8 +805,8 @@ class PlotWidget(QWidget):
             self.spec_path_changed()
 
         if refcenter is not None:
-            self.ra_input.setValue(refcenter[0])
-            self.dec_input.setValue(refcenter[1])
+            self.ra_input.set_value(refcenter[0])
+            self.dec_input.set_value(refcenter[1])
 
         # self.update_values('eq')
 
@@ -856,6 +902,14 @@ class PlotWidget(QWidget):
     @Slot()
     def spec_borders_changed(self):
         self.borders = self.border_w.borders
+        if self.borders[4] != self.slit.crpix_header:
+            offset = (self.borders[4]-self.slit.crpix_header) * self.slit.scale
+            offset = offset * u.arcsec
+            newpos = self.slit.refcoord.directional_offset_by(self.slit.pa*u.deg,
+                                                              offset)
+            self.ra_input.set_value(newpos.ra)
+            self.dec_input.set_value(newpos.dec)
+
         self.slit.add_limits(self.borders)
         try:
             self.image_plot.plot_slit(self.slit)
@@ -865,10 +919,12 @@ class PlotWidget(QWidget):
         if self.spec_frame:
             self.spec_fig.figure.clear()
             self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame,
-                                      self.borders)
+                                      self.borders, slit=self.slit)
+            self.spec_plot.update_pos(self.slit.pos)
 
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
+            # TODO: брать pos сразу из slit
             pos, flux = self.interp_params.get_flux(self.slit,
                                                     init_pos=self.spec_plot.pos)
             self.spec_plot.plot_image_flux(pos, flux)
@@ -892,6 +948,7 @@ class PlotWidget(QWidget):
 
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
+            # TODO: брать pos сразу из slit
             pos, flux = self.interp_params.get_flux(self.slit,
                                                     init_pos=self.spec_plot.pos)
             self.spec_plot.plot_image_flux(pos, flux)
@@ -918,7 +975,8 @@ class PlotWidget(QWidget):
                               self.PA_input.value(), self.scale_input.value())
 
         if coord == 'scale' and self.spec_plot is not None:
-            self.spec_plot.update_scale(self.scale_input.value())
+            # self.spec_plot.update_scale(self.scale_input.value())
+            self.spec_plot.update_pos(self.slit.pos)
 
         for i in self.inputs_list:
             i.blockSignals(False)
@@ -928,16 +986,16 @@ class PlotWidget(QWidget):
             eq = SkyCoord(self.ra_input.getAngle(), self.dec_input.getAngle(),
                           unit=(u.hourangle, u.deg))
             im = self.image_plot.wcs.world_to_pixel(eq)
-            self.x_input.setValue(im[0])
-            self.y_input.setValue(im[1])
+            self.x_input.set_value(im[0])
+            self.y_input.set_value(im[1])
 
     def slit_from_eq(self):
         if self.slit is not None:
             eq = SkyCoord(self.ra_input.getAngle(), self.dec_input.getAngle(),
                           unit=(u.hourangle, u.deg))
             slit = eq.transform_to(self.init_slit_frame)
-            self.perp_input.setValue(slit.lon.to(u.arcsec).value)
-            self.along_input.setValue(slit.lat.to(u.arcsec).value)
+            self.perp_input.set_value(slit.lon.to(u.arcsec).value)
+            self.along_input.set_value(slit.lat.to(u.arcsec).value)
 
     def eq_from_slit(self, coord=None):
         if coord is not None:
@@ -953,8 +1011,8 @@ class PlotWidget(QWidget):
                             self.along_input.value() * u.arcsec,
                             frame=self.init_slit_frame)
             eq = slit.transform_to(ICRS)
-            self.dec_input.setValue(eq.dec)
-            self.ra_input.setValue(eq.ra)
+            self.dec_input.set_value(eq.dec)
+            self.ra_input.set_value(eq.ra)
 
     def eq_from_im(self, coord=None):
         if coord is not None:
@@ -965,16 +1023,16 @@ class PlotWidget(QWidget):
         if self.image_frame is not None:
             im = [self.x_input.value(), self.y_input.value()]
             eq = self.image_plot.wcs.pixel_to_world(*im)
-            self.dec_input.setValue(eq.dec)
-            self.ra_input.setValue(eq.ra)
+            self.dec_input.set_value(eq.dec)
+            self.ra_input.set_value(eq.ra)
 
     def fill_fileds_from_slit(self, slit: SlitParams):
         for i in self.inputs_list:
             i.blockSignals(True)
-        self.PA_input.setValue(slit.pa)
-        self.scale_input.setValue(slit.scale)
-        self.dec_input.setValue(slit.refcoord.dec)
-        self.ra_input.setValue(slit.refcoord.ra)
+        self.PA_input.set_value(slit.pa)
+        self.scale_input.set_value(slit.scale)
+        self.dec_input.set_value(slit.refcoord.dec)
+        self.ra_input.set_value(slit.refcoord.ra)
         self.update_values('eq')
         # self.update_values('scale')
         for i in self.inputs_list:
@@ -1075,7 +1133,7 @@ class PlotWidget(QWidget):
                                             self.interp_params, transform_f))
         optargs = (self.spec_plot, self.interp_params, transform_f)
         worker = Worker(self.try_different_minimizers, self.qfunc_eq, params,
-                                                    optargs, bounds)
+                        optargs, bounds)
         worker.signals.result.connect(lambda x: self.minimization_finished(x, mode, transform_f))
         # worker.signals.result.connect(print)
         self.threadpool.start(worker)
@@ -1094,17 +1152,17 @@ class PlotWidget(QWidget):
         for i in self.inputs_list:
             i.blockSignals(True)
         if mode == 'eq':
-            self.ra_input.setValue(good_params.x[0] * u.hourangle)
-            self.dec_input.setValue(good_params.x[1] * u.deg)
+            self.ra_input.set_value(good_params.x[0] * u.hourangle)
+            self.dec_input.set_value(good_params.x[1] * u.deg)
         elif mode == 'im':
-            self.x_input.setValue(good_params.x[0])
-            self.y_input.setValue(good_params.x[1])
+            self.x_input.set_value(good_params.x[0])
+            self.y_input.set_value(good_params.x[1])
         elif mode == 'slit':
-            self.along_input.setValue(good_params.x[0])
-            self.perp_input.setValue(good_params.x[1])
+            self.along_input.set_value(good_params.x[0])
+            self.perp_input.set_value(good_params.x[1])
 
-        self.PA_input.setValue(good_params.x[2])
-        self.scale_input.setValue(good_params.x[3])
+        self.PA_input.set_value(good_params.x[2])
+        self.scale_input.set_value(good_params.x[3])
         self.update_values('scale')
         for i in self.inputs_list:
             i.blockSignals(False)
@@ -1232,8 +1290,9 @@ class PlotWidget(QWidget):
         if 'EPOCH' in hdul[0].header:
             hdul[0].header['EPOCH'] = 2000.0
         hdul[0].header['POSANG'] = self.PA_input.value()
-        if 'CRPIX2' not in hdul[0].header:
-            hdul[0].header['CRPIX2'] = self.slit.crpix_init
+        # slit.crpix_header is in 0-based pixel numeration
+        # fits standard is 1-based numeration
+        hdul[0].header['CRPIX2'] = self.slit.crpix_header + 1
         hdul.writeto(files_path, overwrite=True)
 
         print(files_path)

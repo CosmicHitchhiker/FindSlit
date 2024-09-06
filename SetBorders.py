@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QLabel,
-    QButtonGroup,
 )
 from matplotlib.figure import Figure
 # noinspection PyUnresolvedReferences
@@ -119,14 +118,14 @@ class PairLabledSpinBox(QWidget):
 
 
 class BorderLine:
-    def __init__(self, ax, pos, ltype='h'):
+    def __init__(self, ax, pos, ltype='h', color='red', lw=1):
         self.ax = ax
         self.fig = ax.get_figure()
         self.ltype = ltype
         if ltype == 'h':
-            self.line = ax.axhline(pos, linestyle='--', color='red', lw=1)
+            self.line = ax.axhline(pos, linestyle='--', color=color, lw=lw)
         elif ltype == 'v':
-            self.line = ax.axvline(pos, linestyle='--', color='red', lw=1)
+            self.line = ax.axvline(pos, linestyle='--', color=color, lw=lw)
         else:
             raise AttributeError("'type' should be 'h' or 'v'")
 
@@ -144,6 +143,7 @@ class BorderLine:
 
 class FilterButton(QPushButton):
     set_filter = Signal(list)
+
     def __init__(self, text='', parent=None, limits=None):
         super().__init__(text, parent)
         if limits is not None:
@@ -178,12 +178,14 @@ class SetBorders(QDialog):
         self.maxx_line = BorderLine(self.ax, 0, 'v')
         self.miny_line = BorderLine(self.ax, 0, 'h')
         self.maxy_line = BorderLine(self.ax, 0, 'h')
+        self.ref_line = BorderLine(self.ax, 0, 'h', 'green', 3)
         self.counter = 0
 
         self.x_box = PairLabledSpinBox('x_min', 'x_max')
         self.y_box = PairLabledSpinBox('y_min', 'y_max')
         self.l_box = PairLabledSpinBox('l_min', 'l_max',
                                        val_type='float')
+        self.ref_box = LabledSpinBox('CRPIX')
         filters = {"u": [3000, 4000],
                    "g": [4000, 5350],
                    "r": [5500, 6800],
@@ -199,6 +201,7 @@ class SetBorders(QDialog):
         val_layout.addWidget(self.x_box)
         val_layout.addWidget(self.y_box)
         val_layout.addWidget(self.l_box)
+        val_layout.addWidget(self.ref_box)
 
         b_layout = QHBoxLayout()
         b_layout.addWidget(self.cancel_button)
@@ -218,6 +221,7 @@ class SetBorders(QDialog):
         self.y_box.maxChanged.connect(self.maxy_line.change_pos)
         self.l_box.minChanged.connect(self.minl_changed)
         self.l_box.maxChanged.connect(self.maxl_changed)
+        self.ref_box.valueChanged.connect(self.ref_line.change_pos)
         self.cancel_button.clicked.connect(self.reject)
         self.apply_button.clicked.connect(self.apply_borders)
         for f in self.filter_buttons.values():
@@ -239,10 +243,15 @@ class SetBorders(QDialog):
         self.x_box.set_range(minx, maxx)
         self.y_box.set_range(miny, maxy)
         self.l_box.set_range(minl, maxl)
+        self.ref_box.set_range(miny - 1000, maxy + 1000)
 
         self.x_box.set_values(minx, maxx)
         self.y_box.set_values(miny, maxy)
         self.l_box.set_values(minl, maxl)
+        if 'CRPIX2' in frame.header:
+            self.ref_box.set_value(frame.header['CRPIX2'])
+        else:
+            self.ref_box.set_value(0)
 
         # self.minx_line = BorderLine(self.ax, minx-1, 'v')
         self.minx_line.change_pos(minx-1)
@@ -258,7 +267,8 @@ class SetBorders(QDialog):
         self.borders = [self.x_box.get_min() - 1,
                         self.x_box.get_max(),
                         self.y_box.get_min() - 1,
-                        self.y_box.get_max()]
+                        self.y_box.get_max(),
+                        self.ref_box.value() - 1]
 
         super().accept()
 
@@ -287,5 +297,3 @@ class SetBorders(QDialog):
         maxl = self.wl_transform.x_to_wl(val)
         self.l_box.maxbox.set_value(maxl)
         self.l_box.blockSignals(False)
-
-
