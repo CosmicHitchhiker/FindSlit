@@ -48,6 +48,10 @@ from slitPolygon import slitPolygon, rotatedTriangle
 from SetBorders import SetBorders
 from SetBias import SetBias
 
+import warnings
+
+warnings.filterwarnings('ignore', module='astropy.wcs')
+
 matplotlib.use('QtAgg')
 
 
@@ -776,7 +780,7 @@ class PlotWidget(QWidget):
                             self.x_input.spinbox, self.y_input.spinbox,
                             self.along_input.spinbox, self.perp_input.spinbox]
 
-        self.redraw_button = QPushButton(text='Reopen files')
+        self.reopen_button = QPushButton(text='Reopen files')
         self.saveres_button = QPushButton(text='Save Results')
         self.calculate_button = QPushButton(text='Find optimal parameters')
         self.border_button = QPushButton(text='Set borders')
@@ -810,7 +814,7 @@ class PlotWidget(QWidget):
 
         # self.update_values('eq')
 
-        self.redraw_button.clicked.connect(self.redraw)
+        self.reopen_button.clicked.connect(self.redraw)
         self.calculate_button.clicked.connect(self.find_optimal_parameters)
         self.border_button.clicked.connect(self.set_borders)
         self.bias_button.clicked.connect(self.set_bias)
@@ -830,7 +834,7 @@ class PlotWidget(QWidget):
     def __setLayout(self):
         # Layout
         r_button_layout = QHBoxLayout()
-        r_button_layout.addWidget(self.redraw_button)
+        r_button_layout.addWidget(self.reopen_button)
         r_button_layout.addWidget(self.saveres_button)
 
         l_button_layout = QHBoxLayout()
@@ -931,7 +935,8 @@ class PlotWidget(QWidget):
 
     @Slot()
     def redraw(self):
-        """Redraw all plots. This function runs only when redraw button is clicked."""
+        """Redraw all plots. This function runs only when the "reopen files"
+        button is clicked."""
         self.spec_path_changed()
         self.image_path_changed()
 
@@ -944,7 +949,8 @@ class PlotWidget(QWidget):
 
         if self.spec_frame:
             self.spec_fig.figure.clear()
-            self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame)
+            self.spec_plot = PlotSpec(self.spec_fig.figure, self.spec_frame,
+                                      slit=self.slit)
 
         if self.image_frame and self.spec_frame:
             self.interp_params.update(self.image_frame, self.slit)
