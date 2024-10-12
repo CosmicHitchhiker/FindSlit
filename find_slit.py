@@ -1,8 +1,5 @@
 #! /usr/bin/env python3
 
-# Copyright (C) 2022 The Qt Company Ltd.
-# SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
-
 import sys
 
 import matplotlib.pyplot as plt
@@ -753,6 +750,7 @@ class PlotWidget(QWidget):
 
         self.PA_input = PaField('double', label='PA, deg',
                                 minval=-360, maxval=360, dec=1)
+        self.PA_input.checkbox.setEnabled(False)
 
         self.scale_input = ParameterField('double', label='Scale "/pix',
                                           dec=4)

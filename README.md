@@ -83,10 +83,12 @@ The left one is the plot of the normalised fluxes. The blue line is the spectrum
 flux (sum across all wavelengths at the given range). The red one is the flux from the image on the given position of
 the slit.
 
-The right image is the picture of an object with the slit plotted over it.
+The right image is the picture of an object with the slit plotted over it. The arrow shows the direction of the increasing of
+the y-coordinate in the spectrum fits-file. The green cross marks the adopted CRPIX2 coordinates.
 
 It is possible to manipulate both images (zoom, move, save)
 with the standard matplotlib tools by clicking the pictograms on the top of the plots.
+It is also possible to save images in various formats.
 
 #### Paths to files
 The left field is for the path of the file with spectrum, and the right field is for the path of the photometry file.
@@ -118,7 +120,7 @@ The direction of the slit is the direction from its bottom
 'Scale' is the size of a pixel of the spectrum
 file across the positional coordinate in arcseconds.
 
-It is possible to change them the same way that you change the position. Note that the 'fix' checkbox does nothing for the PA parameter.
+It is possible to change them the same way that you change the position.
 
 #### 'Find optimal parameters' button
 Clicking on this button starts the calculation process to find the best fit for the parameters that are set in the fields above.
@@ -128,13 +130,14 @@ Optimal coordinates will be searched in the 30-arcsecond area. The optimal scale
 the corresponding field.
 
 #### 'Set borders' button
-This button opens a dialogue window where you can set boundaries for the spectrum.
+This button opens a dialogue window where you can set boundaries and the reference pixel for the spectrum.
 
  <p align="center">
-  <img src="images/Limits.png" width="100%" alt="Example">
+  <img src="images/Limits.png" width="100%" alt="Limits">
 </p>
 
-The image in this window is the 2-D spectrum, presented in the 'spectrum' fits file.
+The image in this window is the 2-D spectrum, presented in the 'spectrum' fits file. Red lines are the adopted limints
+along x- and y-axes. The green line shows the adopted CRPIX2 (reference pixel along y-coordinate).
 The first row of buttons allows you to set wavelength limits that correspond with SDSS photometric filters.
 The second row lets you select limits for y or x-axis positions (pixel) or wavelengths (will be recalculated to x-limits).
 After you set the limits, only the spectrum inside these bounds will be used for fitting and plotting.
@@ -156,23 +159,24 @@ The file with the result is the copy of the input spectrum files with the next k
  - RA and DEC will be set to the corresponding coordinates values
  - if EPOCH is presented in the header, it will be set to 2000.0
  - POSANG will be set to the PA value
- - if no CRPIX2 is presented in the header, it will be set to NAXIS2 divided by two
+ - CRPIX2 will be set according to the CRPIX value in the 'Set borders' window
 
 ### Basic usage
 Basic usage consists of several steps:
  - Open necessary files (spectrum and photometry)
  - Set the slit position to the point which is close to the real position (not farther than 30 arcsec in each direction).
- - Check if PA is correct. Sometimes it is needed to subtract 180 degrees for a proper calculation.
+ - Check if PA is correct. Sometimes you may need to subtract 180 degrees for a proper calculation.
  - Click the 'Find optimal parameters button'.
  - If you are satisfied with the results, save them.
 
 ### Advanced usage 
 Sometimes you may need additional steps:
  - Set borders (limits) for wavelength range and y-axis coordinate in the spectrum
+ - Set the CRPIX2 value
  - Subtract bias
 
 It is also possible to set some parameters in the command line. For more information type `./find_slit.py -h` in the terminal.
 _This feature is not completely implemented yet._
 
 ## Contact information and bug reports
-If you want to discuss this software, you can contact me directly on GitHub or send an email to landervyu(at)gmail.com
+If you want to discuss this software, you can contact me directly on GitHub or email to landervyu(at)gmail.com

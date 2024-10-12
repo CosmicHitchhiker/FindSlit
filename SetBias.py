@@ -1,13 +1,8 @@
 from PySide6.QtCore import Slot, Signal
 from PySide6.QtWidgets import (
-    QWidget,
     QDialog,
     QDoubleSpinBox,
-    QSpinBox,
     QFormLayout,
-    QPushButton,
-    QLabel,
-    QButtonGroup,
 )
 
 
